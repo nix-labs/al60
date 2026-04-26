@@ -1,4 +1,4 @@
-name: Compile Production Firmware
+name: Compile and Release Firmware
 
 on:
   push:
@@ -15,6 +15,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     env:
+      # Force the runner to use Node 24 for all steps/actions
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
       - name: Checkout code
@@ -28,14 +29,19 @@ jobs:
       - name: Install ESPHome and esptool
         run: pip install esphome esptool
 
-      - name: Extract Production Version
+      - name: Extract Version from YAML
         id: get_version
         run: |
+          # Use head -n 1 to ensure we only grab the actual version substitution, 
+          # not any lines containing 'v${version}' further down the file.
           RAW_VER=$(grep 'version:' al60_factory.yaml | head -n 1 | awk '{print $2}' | tr -d '"')
+          # Echoing the shell variable directly into GITHUB_OUTPUT prevents the 
+          # runner from parsing it as a GitHub context variable.
           echo "firmware_version=$RAW_VER" >> "$GITHUB_OUTPUT"
 
-      - name: Compile Production Binary
-        run: esphome compile al60_factory.yaml
+      - name: Compile ESPHome Binary
+        run: |
+          esphome compile al60_factory.yaml
 
       - name: Prepare Assets and Manifest
         id: prepare_assets
@@ -45,20 +51,31 @@ jobs:
           BUILD_PATH=".esphome/build/al60/.pioenvs/al60"
           V_NUM="${{ steps.get_version.outputs.firmware_version }}"
 
-          # 1. Process Production Firmware
+          # 1. Copy individual parts
+          cp $BUILD_PATH/bootloader.bin public/firmware/bootloader.bin
+          cp $BUILD_PATH/partitions.bin public/firmware/partitions.bin
+          cp $BUILD_PATH/ota_data_initial.bin public/firmware/ota_data_initial.bin
           cp $BUILD_PATH/firmware.bin public/firmware/al60_${V_NUM}_ota.bin
-          
+
+          # 2. Bake the version into al60.yaml for the end-user import
+          # Using single quotes for the search pattern hides ${version} from the GitHub runner
+          cp al60.yaml public/al60.yaml
+          sed -i 's/v\${version}/v'"$V_NUM"'/g' public/al60.yaml
+
+          # 3. Create Merged Factory Binary
           esptool.py --chip esp32c3 merge_bin \
             -o public/firmware/al60_${V_NUM}_factory.bin \
-            --flash_mode dio --flash_size 4MB \
-            0x0000 $BUILD_PATH/bootloader.bin \
-            0x8000 $BUILD_PATH/partitions.bin \
-            0xd000 $BUILD_PATH/ota_data_initial.bin \
+            --flash_mode dio \
+            --flash_size 4MB \
+            0x0000 public/firmware/bootloader.bin \
+            0x8000 public/firmware/partitions.bin \
+            0xd000 public/firmware/ota_data_initial.bin \
             0x10000 public/firmware/al60_${V_NUM}_ota.bin
 
+          # 4. Calculate MD5
           MD5_OTA=$(md5sum public/firmware/al60_${V_NUM}_ota.bin | awk '{ print $1 }')
 
-          # 2. Create Production Manifest
+          # 5. Create Manifest
           cat <<EOF > public/firmware/manifest.json
           {
             "name": "NIX labs AL60",
@@ -71,60 +88,16 @@ jobs:
                   { "path": "al60_${V_NUM}_factory.bin", "offset": 0 }
                 ],
                 "ota": {
-                  "path": "https://nix-labs.github.io/al60/firmware/al60_${V_NUM}_ota.bin",
+                  "path": "https://assets.nixlabs.com.au/al60/firmware/al60_${V_NUM}_ota.bin",
                   "md5": "$MD5_OTA",
-                  "release_url": "https://github.com/nix-labs/al60/releases/tag/v${V_NUM}",
+                  "release_url": "https://github.com/n33174/al60/releases/tag/v${V_NUM}",
                   "summary": "Firmware update for NIX labs AL60 v${V_NUM}"
                 }
               }
             ]
           }
-EOF
+          EOF
 
-          # 3. Create Production WebFlash Page
-          cat <<EOF > public/index.html
-          <!DOCTYPE html>
-          <html>
-          <head>
-            <meta charset="utf-8" />
-            <title>NIX labs AL60 | Installation</title>
-            <meta name="viewport" content="width=device-width, initial-scale=1" />
-            <script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
-            <style>
-              body { font-family: 'Inter', sans-serif; background: #101828; color: #f9fafb; margin: 0; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
-              .container { max-width: 500px; width: 100%; padding: 2.5rem; text-align: center; }
-              h1 { color: #FF9100; font-family: 'Exo 2', sans-serif; margin-bottom: 0.5rem; }
-              .subtitle { color: #9ca3af; margin-bottom: 2.5rem; font-size: 0.9rem; }
-              .card { background: rgba(16, 24, 40, 0.8); border: 1px solid rgba(255, 145, 0, 0.2); border-radius: 16px; padding: 2rem; backdrop-filter: blur(8px); box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
-              .card h2 { margin-top: 0; font-size: 1.4rem; color: #fff; margin-bottom: 1rem; }
-              .card p { color: #9ca3af; font-size: 0.95rem; margin-bottom: 2rem; line-height: 1.5; }
-              esp-web-install-button { --esp-tools-button-color: #FF9100; --esp-tools-button-text-color: #ffffff; }
-              .version-badge { display: inline-block; background: rgba(255, 145, 0, 0.1); color: #FF9100; padding: 0.25rem 0.75rem; border-radius: 20px; font-size: 0.75rem; font-weight: 700; margin-bottom: 1rem; }
-            </style>
-          </head>
-          <body>
-            <div class="container">
-              <h1>NIX labs AL60</h1>
-              <p class="subtitle">Official Installation Tool</p>
-              
-              <div class="card">
-                <div class="version-badge">v$V_NUM</div>
-                <h2>Production Firmware</h2>
-                <p>Flash the latest official firmware for your AL60 Ring Clock. This includes all features, animations, and the web interface.</p>
-                <esp-web-install-button manifest="./firmware/manifest.json"></esp-web-install-button>
-              </div>
-
-              <div style="margin-top: 3rem; color: #4b5563; font-size: 0.75rem;">
-                © 2026 NIX labs
-              </div>
-            </div>
-          </body>
-          </html>
-EOF
-
-          # 4. Bake the version into al60.yaml for end-user remote package imports
-          cp al60.yaml public/al60.yaml
-          sed -i 's/v\${version}/v'"$V_NUM"'/g' public/al60.yaml
           cp -r static/* public/static/
 
       - name: Create GitHub Release
@@ -136,14 +109,20 @@ EOF
           gh release create "$V_NUM" \
             public/firmware/*.bin \
             public/firmware/manifest.json \
-            --title "Release $V_NUM" \
-            --notes "Automated production firmware build for $V_NUM" \
+            --title "Release ${{ steps.get_version.outputs.firmware_version }}" \
+            --notes "Automated firmware build for $V_NUM" \
             --generate-notes
 
       - name: Upload Pages Artifact
         uses: actions/upload-pages-artifact@v4
         with:
           path: ./public
+
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: al60-firmware-${{ steps.get_version.outputs.firmware_version }}
+          path: public/firmware/
 
   deploy-pages:
     needs: build
@@ -158,4 +137,3 @@ EOF
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v5
-

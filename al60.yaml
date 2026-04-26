@@ -29,4 +29,3 @@ external_components:
   # The custom component driving the clock
   - source: github://nix-labs/al60@main
     components: [ring_clock]
-
