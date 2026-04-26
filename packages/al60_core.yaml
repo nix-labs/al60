@@ -1,0 +1,158 @@
+# AL60 Core Package
+# Defines system globals, ESPHome settings, and performance tuning for the ESP32-C3.
+
+# Variables used by the system
+globals:
+  - id: last_clock_effect
+    type: std::string
+    restore_value: yes
+    initial_value: '"Clock"'
+  - id: last_light_control_mode
+    type: std::string
+    initial_value: '""'
+  - id: timezone_configured
+    type: bool
+    restore_value: true
+    initial_value: "false"
+  - id: boot_complete
+    type: bool
+    initial_value: "false"
+  - id: detected_iana
+    type: std::string
+  - id: detected_offset
+    type: std::string
+  - id: minute_button_long_press
+    type: bool
+    initial_value: "false"
+  - id: hour_button_long_press
+    type: bool
+    initial_value: "false"
+  - id: timer_h
+    type: int
+    initial_value: "0"
+  - id: timer_m
+    type: int
+    initial_value: "0"
+  - id: timer_s
+    type: int
+    initial_value: "0"
+  - id: colours_initialized
+    type: bool
+    restore_value: true
+    initial_value: "false"
+  - id: last_sensor_effect
+    type: int
+    restore_value: true
+    initial_value: "0"
+
+esphome:
+  name_add_mac_suffix: false
+  platformio_options:
+    board_build.flash_mode: dio
+
+esp32:
+  board: esp32-c3-devkitm-1
+  variant: ESP32C3
+  framework:
+    type: esp-idf
+    sdkconfig_options:
+      # Performance tuning for smooth LED animations on ESP32-C3.
+      # These settings ensure the LED data transmission is not interrupted by WiFi tasks.
+      CONFIG_RMT_ISR_IRAM_SAFE: "y"
+      CONFIG_ESP_WIFI_IRAM_OPT: "y"
+      CONFIG_ESP_WIFI_RX_IRAM_OPT: "y"
+      CONFIG_RINGBUF_PLACE_ISR_FUNCTIONS_IN_IRAM: "y"
+
+# Logging Configuration
+logger:
+  level: INFO
+  logs:
+    # Suppress noisy sensor value updates
+    sensor: WARN
+    binary_sensor: WARN
+    switch: WARN
+    number: WARN
+    text: WARN
+    datetime.datetime_entity: WARN
+    ld2410: WARN
+
+    # Keep important components visible
+    component: INFO
+    api: INFO
+    ota: INFO
+    wifi: INFO
+    web_server: INFO
+
+# Native API for Home Assistant
+api:
+  # No encryption key by default to make local access easier
+  # Can be added in local overrides if desired
+  reboot_timeout: 0s
+
+# Over-The-Air Updates
+ota:
+  - platform: http_request # Allow pulling updates from the internet
+  - platform: web_server # Allow uploading via web UI
+  - platform: esphome # Allow updating via ESPHome dashboard
+
+# Required for http_request OTA platform and timezone discovery
+http_request:
+json:
+
+# Update Check for NIX labs compiled firmware
+update:
+  - platform: http_request
+    id: firmware_update
+    name: Firmware Update
+    source: https://assets.nixlabs.com.au/al60/firmware/manifest.json
+    web_server:
+      sorting_group_id: sorting_system
+      sorting_weight: 1
+
+wifi:
+  # Disable WiFi power save to ensure the web interface remains highly responsive.
+  power_save_mode: none
+
+  # Fallback Access Point
+  ap:
+    ssid: "${friendly_name}"
+    password: "12345678"
+
+# Captive Portal for fallback wifi configuration
+captive_portal:
+
+# Web Interface Configuration
+web_server:
+  id: web_ui
+  port: 80
+  version: 3
+
+  # Custom NIX labs branded JavaScript (Theme built-in)
+  js_url: https://assets.nixlabs.com.au/al60/static/www.js
+
+  # Organize the web entities into logical groups
+  sorting_groups:
+    - id: sorting_time
+      name: "Time Settings"
+      sorting_weight: 10
+    - id: sorting_clock
+      name: "Clock Settings"
+      sorting_weight: 20
+    - id: sorting_clock_led
+      name: "Clock LED Customisation"
+      sorting_weight: 25
+    - id: sorting_sensors
+      name: "Sensors"
+      sorting_weight: 30
+    - id: sorting_timer
+      name: "Timer & Stopwatch"
+      sorting_weight: 40
+    - id: sorting_alarm
+      name: "Alarm"
+      sorting_weight: 45
+    - id: sorting_other
+      name: "Other"
+      sorting_weight: 50
+    - id: sorting_system
+      name: "System"
+      sorting_weight: 60

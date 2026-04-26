@@ -1,0 +1,342 @@
+# AL60 Time Package
+# Manages time synchronization using the Hardware RTC and Network Time Protocol (SNTP).
+
+esphome:
+  on_boot:
+    # Priority 500: Read time from hardware RTC on boot.
+    - priority: 500
+      then:
+        - pcf8563.read_time: rtc_time
+        - lambda: |-
+            if (!id(sntp_time)->now().is_valid()) {
+              // RTC had no valid time (brand new or dead battery).
+              // Seed with a sensible default so buttons can be used to set the time.
+              // 1767225600 = 2026-01-01 00:00:00 UTC
+              struct timeval tv = { .tv_sec = 1767225600, .tv_usec = 0 };
+              settimeofday(&tv, NULL);
+              ESP_LOGW("main", "Boot: RTC invalid — seeded default time (2026-01-01).");
+            } else {
+              ESP_LOGI("main", "Boot: Hardware RTC time restored.");
+            }
+
+    # Priority 200: Apply the restored timezone.
+    - priority: 200
+      then:
+        - lambda: |-
+            std::string tz = id(time_zone)->state;
+            if (!tz.empty()) {
+              id(sntp_time)->set_timezone(tz);
+              ESP_LOGI("main", "Boot: Applied restored timezone: %s", tz.c_str());
+            }
+        # Restore manual time sync state if it was active.
+        - if:
+            condition:
+              - switch.is_off: sntp_switch
+            then:
+              - lambda: "id(RingClock)->set_sntp_enabled(false);"
+              - logger.log:
+                  level: WARN
+                  format: "Boot: SNTP sync disabled (Manual Mode was active before reboot)."
+
+    # Priority 100: Network-dependent tasks (update check, auto-detect TZ, first SNTP sync)
+    - priority: 100
+      then:
+        - wait_until:
+            condition:
+              wifi.connected:
+        - update.check: firmware_update
+        # Trigger an immediate SNTP sync on the first WiFi connection after boot.
+        # (wifi on_connect handles subsequent connections.)
+        - if:
+            condition:
+              lambda: "return id(RingClock)->get_sntp_enabled();"
+            then:
+              - lambda: "id(sntp_time)->update();"
+              - logger.log:
+                  level: WARN
+                  format: "Boot: WiFi connected — triggering immediate SNTP sync."
+        - if:
+            condition:
+              lambda: |-
+                return !id(timezone_configured);
+            then:
+              - button.press: detect_timezone
+              - globals.set:
+                  id: timezone_configured
+                  value: "true"
+
+    # Priority 50: Mark boot as complete.
+    - priority: 50
+      then:
+        - globals.set:
+            id: boot_complete
+            value: "true"
+        - logger.log:
+            level: WARN
+            format: "Boot sequence complete."
+
+wifi:
+  # Trigger network time sync on WiFi connection.
+  on_connect:
+    then:
+      - lambda: "id(RingClock)->set_network_ready();"
+      - logger.log:
+          level: WARN
+          format: "WiFi connected — network ready signalled to ring_clock."
+
+time:
+  # Hardware Real Time Clock (PCF8563)
+  # read_time()/write_time() always use UTC internally.
+  - platform: pcf8563
+    address: 0x51
+    update_interval: never
+    id: rtc_time
+    timezone: ${time_zone}
+    on_time:
+      # Alarm logic: check every minute if alarm should fire
+      - seconds: 0
+        minutes: /1
+        then:
+          - lambda: |-
+              auto now = id(sntp_time)->now();
+              auto alarm = id(alarm_time);
+              if (id(alarm_enabled)->state && now.hour == alarm->hour && now.minute == alarm->minute) {
+                id(RingClock)->start_alarm();
+                if (id(alarm_once)->state) {
+                  id(alarm_enabled)->turn_off();
+                }
+              }
+
+  # Internet Time Sync (SNTP)
+  - platform: sntp
+    id: sntp_time
+    timezone: ${time_zone}
+    on_time_sync:
+      then:
+        - lambda: "id(RingClock)->apply_sntp_sync(id(sntp_time)->timestamp_now());"
+        - if:
+            condition:
+              lambda: "return id(RingClock)->get_sntp_enabled();"
+            then:
+              - pcf8563.write_time: rtc_time
+              - logger.log:
+                  level: WARN
+                  format: "SNTP Synchronized — writing to hardware RTC."
+            else:
+              - logger.log:
+                  level: INFO
+                  format: "SNTP Sync arrived but ignored (Manual Mode active)."
+
+interval:
+  # Periodic RTC sync: keep hardware clock accurate during normal SNTP operation
+  - interval: 15min
+    then:
+      - if:
+          condition:
+            lambda: "return id(RingClock)->get_sntp_enabled() && id(sntp_time)->now().is_valid();"
+          then:
+            - pcf8563.write_time: rtc_time
+            - logger.log:
+                level: WARN
+                format: "Periodic RTC sync: System time written to hardware RTC."
+
+datetime:
+  # Manual time setting via Web UI.
+  # The ring_clock component handles timezone conversion and switches to manual mode.
+  - platform: template
+    name: "Custom Time"
+    id: custom_time
+    type: datetime
+    initial_value: "2026-01-01 12:00:00"
+    optimistic: True
+    restore_value: True
+    web_server:
+      sorting_group_id: sorting_time
+      sorting_weight: 3
+    on_value:
+      then:
+        - if:
+            condition:
+              lambda: "return id(boot_complete);"
+            then:
+              - lambda: |-
+                  id(RingClock)->set_manual_time(
+                      x.year, x.month, x.day_of_month,
+                      x.hour, x.minute, x.second);
+              - pcf8563.write_time: rtc_time
+              - switch.turn_off: sntp_switch
+              - logger.log:
+                  level: WARN
+                  format: "Manual time applied and saved to RTC."
+
+  # Alarm time setting
+  - platform: template
+    name: "Alarm Time"
+    id: alarm_time
+    type: time
+    initial_value: "07:00:00"
+    optimistic: True
+    restore_value: True
+    web_server:
+      sorting_group_id: sorting_alarm
+      sorting_weight: 4
+
+switch:
+  # Master switch for internet time sync
+  - platform: template
+    name: "Enable SNTP Sync"
+    id: sntp_switch
+    optimistic: True
+    restore_mode: RESTORE_DEFAULT_ON
+    web_server:
+      sorting_group_id: sorting_time
+      sorting_weight: 2
+    on_turn_on:
+      then:
+        - lambda: "id(RingClock)->set_sntp_enabled(true);"
+        - lambda: "id(sntp_time)->update();"
+        - if:
+            condition:
+              lambda: "return id(sntp_time)->now().is_valid();"
+            then:
+              - pcf8563.write_time: rtc_time
+        - logger.log:
+            level: WARN
+            format: "SNTP Sync enabled. Restart the clock to force a time sync."
+    on_turn_off:
+      then:
+        - lambda: "id(RingClock)->set_sntp_enabled(false);"
+        - logger.log:
+            level: WARN
+            format: "SNTP Sync disabled (Manual Mode)"
+
+  # Alarm Controls
+  - platform: template
+    name: "Alarm Enabled"
+    id: alarm_enabled
+    optimistic: True
+    restore_mode: RESTORE_DEFAULT_OFF
+    web_server:
+      sorting_group_id: sorting_alarm
+      sorting_weight: 1
+
+  # Run alarm once then disable
+  - platform: template
+    name: "Alarm Once"
+    id: alarm_once
+    optimistic: True
+    restore_mode: RESTORE_DEFAULT_OFF
+    web_server:
+      sorting_group_id: sorting_alarm
+      sorting_weight: 2
+
+  # Toggle alarm sounds
+  - platform: template
+    name: "Alarm Sounds"
+    id: alarm_sound
+    optimistic: True
+    restore_mode: RESTORE_DEFAULT_ON
+    web_server:
+      sorting_group_id: sorting_alarm
+      sorting_weight: 3
+
+text:
+  # POSIX Timezone String
+  # Controls how UTC epoch is converted to local display time
+  - platform: template
+    name: "Time Zone"
+    id: time_zone
+    mode: text
+    optimistic: true
+    restore_value: true
+    initial_value: ${time_zone}
+    web_server:
+      sorting_group_id: sorting_time
+      sorting_weight: 1
+    on_value:
+      then:
+        - lambda: |-
+            id(sntp_time)->set_timezone(x);
+            ESP_LOGI("main", "Timezone updated to: %s", x.c_str());
+        - lambda: |-
+            id(timezone_configured) = true;
+
+button:
+  # Detect Timezone via IP Geolocation
+  - platform: template
+    name: "Auto-Detect Time Zone"
+    id: detect_timezone
+    web_server:
+      sorting_group_id: sorting_time
+      sorting_weight: 4
+    on_press:
+      then:
+        - logger.log: "Stage 1: Detecting IANA Timezone..."
+        - http_request.get:
+            url: "http://ipwho.is/"
+            request_headers:
+              User-Agent: "ESPHome/AL60"
+            capture_response: true
+            on_response:
+              then:
+                - lambda: |-
+                    if (body.empty()) {
+                      ESP_LOGE("main", "Timezone Stage 1 failed. Check internet.");
+                      return;
+                    }
+                    json::parse_json(body, [](JsonObject root) -> bool {
+                      JsonObject tz = root["timezone"];
+                        if (tz["id"].is<const char*>() && tz["utc"].is<const char*>()) {
+                          id(detected_iana) = tz["id"].as<std::string>();
+                          id(detected_offset) = tz["utc"].as<std::string>();
+                          id(fetch_posix_rule).press();
+                          return true;
+                        }
+                      return false;
+                    });
+
+  # Stage 2: Lookup POSIX Rule from our static database
+  - platform: template
+    name: "Fetch POSIX Rule"
+    id: fetch_posix_rule
+    internal: true
+    on_press:
+      then:
+        - logger.log: "Stage 2: Looking up POSIX rule for city..."
+        - http_request.get:
+            url: !lambda |-
+              std::string iana = id(detected_iana);
+              size_t pos = iana.find('/');
+              std::string continent = (pos != std::string::npos) ? iana.substr(0, pos) : "Etc";
+              return "https://assets.nixlabs.com.au/al60/static/" + continent + ".json";
+            request_headers:
+              User-Agent: "ESPHome/AL60"
+            capture_response: true
+            on_response:
+              then:
+                - lambda: |-
+                    bool found = false;
+                    std::string iana = id(detected_iana);
+                    if (!body.empty()) {
+                      json::parse_json(body, [&found, iana](JsonObject root) -> bool {
+                        size_t pos = iana.find('/');
+                        std::string city = (pos != std::string::npos) ? iana.substr(pos + 1) : iana;
+                        if (root[city].is<const char*>()) {
+                          std::string posix = root[city].as<std::string>();
+                          auto call = id(time_zone).make_call();
+                          call.set_value(posix);
+                          call.perform();
+                          ESP_LOGI("main", "Success! Applied and saved POSIX rule for %s: %s", iana.c_str(), posix.c_str());
+                          found = true;
+                          return true;
+                        }
+                        return false;
+                      });
+                    }
+
+                    if (!found) {
+                      ESP_LOGW("main", "City '%s' not in DB or DB unreachable. Fallback: ${time_zone}", iana.c_str());
+                      auto call = id(time_zone).make_call();
+                      call.set_value("${time_zone}");
+                      call.perform();
+                    }

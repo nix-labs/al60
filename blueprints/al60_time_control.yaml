@@ -1,0 +1,104 @@
+blueprint:
+  name: NIX labs AL60 Time Control
+  description: Add time based on/off/dim control to your NIX labs AL60 clock
+  source_url: https://github.com/nix-labs/al60/blob/main/blueprints/al60_time_control.yaml
+  domain: automation
+  input:
+    clock_device:
+      name: Clock Device
+      description: Select your NIX labs AL60
+      selector:
+        device:
+          filter:
+            - manufacturer: "NIXlabs"
+    off_time:
+      name: Nighttime (Off/Dim) Time
+      selector:
+        time: {}
+    on_time:
+      name: Daytime (On) Time
+      selector:
+        time: {}
+    night_action:
+      name: Night Action
+      default: "dim"
+      selector:
+        select:
+          options:
+            - label: "Turn Off"
+              value: "off"
+            - label: "Use Low Brightness"
+              value: "dim"
+    # OPTIONAL OVERRIDES
+    manual_light:
+      name: (Optional) Override Light Entity
+      description: Select your ring light entity if your Clock Device was not entered above.
+      default:
+      selector:
+        entity:
+          domain: light
+    manual_std_bright:
+      name: (Optional) Override Standard Brightness
+      description: Leave blank to use clock provided value
+      default:
+      selector:
+        entity:
+          domain: number
+    manual_low_bright:
+      name: (Optional) Override Low/Off Brightness
+      description: Leave blank to use clock provided value
+      default:
+      selector:
+        entity:
+          domain: number
+
+mode: restart
+
+variables:
+  device_id: !input clock_device
+  # Check if manual input exists; if not, search the device for the entity
+  input_light: !input manual_light
+  clock_light: "{{ input_light if input_light is not none else (device_entities(device_id) | select('search', 'light.*ring_light_mode') | first) }}"
+
+  input_std: !input manual_std_bright
+  std_bright_ent: "{{ input_std if input_std is not none else (device_entities(device_id) | select('search', 'number.*standard_brightness_percentage') | first) }}"
+
+  input_low: !input manual_low_bright
+  low_bright_ent: "{{ input_low if input_low is not none else (device_entities(device_id) | select('search', 'number.*low_or_off_brightness_percentage') | first) }}"
+
+trigger:
+  - platform: time
+    at: !input off_time
+    id: "night"
+  - platform: time
+    at: !input on_time
+    id: "day"
+
+action:
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: "night"
+        sequence:
+          - if:
+              - condition: template
+                value_template: "{{ night_action == 'off' }}"
+            then:
+              - action: light.turn_off
+                target:
+                  entity_id: "{{ clock_light }}"
+            else:
+              - action: light.turn_on
+                target:
+                  entity_id: "{{ clock_light }}"
+                data:
+                  brightness_pct: "{{ states(low_bright_ent) | float(25) }}"
+      - conditions:
+          - condition: trigger
+            id: "day"
+        sequence:
+          - action: light.turn_on
+            target:
+              entity_id: "{{ clock_light }}"
+            data:
+              brightness_pct: "{{ states(std_bright_ent) | float(50) }}"

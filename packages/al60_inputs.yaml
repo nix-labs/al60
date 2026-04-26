@@ -1,0 +1,582 @@
+# AL60 Inputs Package
+# Handles physical buttons, user interaction logic, and UI controls for modes and features.
+
+switch:
+  # Toggles for specific visual elements
+  - platform: template
+    name: "Hour Hand Sweep"
+    id: hour_sweep
+    optimistic: True
+    restore_mode: RESTORE_DEFAULT_ON
+    web_server:
+      sorting_group_id: sorting_clock
+      sorting_weight: 2
+  - platform: template
+    name: "Timer & Stopwatch Sounds"
+    id: timer_sounds
+    optimistic: True
+    restore_mode: RESTORE_DEFAULT_ON
+    web_server:
+      sorting_group_id: sorting_timer
+      sorting_weight: 7
+
+select:
+  # Light Control Mode (Select)
+  - platform: template
+    name: "Light Control Mode"
+    id: light_control_mode
+    optimistic: True
+    restore_value: true
+    options:
+      - "Motion Detection"
+      - "Ambient Brightness"
+      - "Motion Ambient Brightness"
+      - "Manual/Off"
+    initial_option: "Motion Detection"
+    web_server:
+      sorting_group_id: sorting_clock
+      sorting_weight: 3
+    on_value:
+      then:
+        - script.execute: update_ring_light
+
+binary_sensor:
+  # Mode Button (Physical)
+  # - Single Click: Cycle Clock Effects
+  # - Double Click: Cycle Sensor Effects
+  # - Long Press: Cycle Light Control Mode
+  - platform: gpio
+    id: mode_button
+    pin:
+      number: GPIO2
+      inverted: True
+      mode: INPUT_PULLUP
+    name: "Mode Button"
+    internal: true
+    filters:
+      - delayed_on_off: 50ms
+    on_multi_click:
+      # Single Click: Cycle through 6 clock presets
+      # Each step applies both the ring_light effect AND the matching colours/effects to individual hand lights
+      - timing:
+          - ON for 50ms to 500ms
+          - OFF for at least 600ms
+        then:
+          - lambda: |-
+              std::string current = id(ring_light)->get_effect_name();
+              std::string hour_eff = id(hour_hand_color)->get_effect_name();
+
+              if (current == "Clock") {
+                auto call = id(ring_light)->turn_on();
+                call.set_effect("Clock (Fade)");
+                call.perform();
+              } else if (current == "Clock (Fade)") {
+                auto call = id(ring_light)->turn_on();
+                call.set_effect("Clock (Tail)");
+                call.perform();
+              } else if (current == "Clock (Tail)" && hour_eff != "Rainbow") {
+                auto call = id(ring_light)->turn_on();
+                call.set_effect("Clock (Rainbow Tail)");
+                call.perform();
+              } else if (current == "Clock (Rainbow Tail)" || (current == "Clock (Tail)" && hour_eff == "Rainbow")) {
+                auto call = id(ring_light)->turn_on();
+                call.set_effect("Clock (RGB)");
+                call.perform();
+              } else if (current == "Clock (RGB)") {
+                auto call = id(ring_light)->turn_on();
+                call.set_effect("Clock (Mono)");
+                call.perform();
+              } else {
+                auto call = id(ring_light)->turn_on();
+                call.set_effect("Clock");
+                call.perform();
+              }
+          - rtttl.play: "click:d=16,o=6,b=120:c"
+      # Double Click: Cycle Sensory Effects on Notification Layer
+      - timing:
+          - ON for 50ms to 500ms
+          - OFF for 50ms to 350ms
+          - ON for 50ms to 500ms
+          - OFF for at least 50ms
+        then:
+          - lambda: |-
+              // Cycle through available sensor effects.
+              bool notif_on = id(notification_color)->remote_values.is_on();
+              std::string effect = id(notification_color)->get_effect_name();
+
+              auto sensor_effect = [](const char* name, int idx) {
+                auto call = id(notification_color)->turn_on();
+                call.set_effect(name);
+                call.perform();
+                id(last_sensor_effect) = idx;
+              };
+
+              if (!notif_on) {
+                // No sensor effect active → enter sensor mode.
+                // Always disable hour sweep: sensor visuals share the LED ring.
+                id(hour_sweep)->turn_off();
+                sensor_effect("Sensors: Dual Bars", 1);
+              } else if (effect == "Sensors: Dual Bars") {
+                sensor_effect("Sensors: Temperature Bar", 2);
+              } else if (effect == "Sensors: Temperature Bar") {
+                sensor_effect("Sensors: Humidity Bar", 3);
+              } else if (effect == "Sensors: Humidity Bar") {
+                sensor_effect("Sensors: Dual Ticks", 4);
+              } else if (effect == "Sensors: Dual Ticks") {
+                sensor_effect("Sensors: Temperature Tick", 5);
+              } else if (effect == "Sensors: Temperature Tick") {
+                sensor_effect("Sensors: Humidity Tick", 6);
+              } else if (effect == "Sensors: Humidity Tick") {
+                sensor_effect("Sensors: Dual Glow", 7);
+              } else if (effect == "Sensors: Dual Glow") {
+                sensor_effect("Sensors: Temperature Glow", 8);
+              } else if (effect == "Sensors: Temperature Glow") {
+                sensor_effect("Sensors: Humidity Glow", 9);
+              } else {
+                // End of cycle (Humidity Glow or any non-sensor effect) →
+                // exit sensor mode, restore hour sweep, clear persisted effect.
+                id(notification_color)->turn_off().perform();
+                id(hour_sweep)->turn_on();
+                id(last_sensor_effect) = 0;
+              }
+          - rtttl.play: "double:d=16,o=6,b=120:c,g"
+      # Long Press: Cycle Light Control Mode
+      - timing:
+          - ON for at least 1s
+        then:
+          - select.next: light_control_mode
+          - lambda: |-
+              std::string mode = id(light_control_mode)->current_option();
+              if (mode == "Motion Detection") {
+                id(buzzer_rtttl)->play("on1:d=16,o=6,b=120:c,e,g,p,c");
+              } else if (mode == "Ambient Brightness") {
+                id(buzzer_rtttl)->play("on2:d=16,o=6,b=120:c,e,g,p,c,p,c");
+              } else if (mode == "Motion Ambient Brightness") {
+                id(buzzer_rtttl)->play("on3:d=16,o=6,b=120:c,e,g,p,c,p,c,p,c");
+              } else {
+                id(buzzer_rtttl)->play("off:d=16,o=6,b=120:g,e,c");
+              }
+
+  # Hour Button (Physical)
+  # - Single Click: Increment Hour (if minute button not held)
+  # - Long Press (1s): Start continuous increment (if minute button not held)
+  - platform: gpio
+    id: hour_button
+    pin:
+      number: GPIO8
+      inverted: True
+      mode: INPUT_PULLUP
+    name: "Hour Button"
+    internal: true
+    filters:
+      - delayed_on_off: 50ms
+    on_press:
+      - lambda: "id(RingClock)->set_sntp_enabled(false);"
+      - switch.turn_off: sntp_switch
+    on_multi_click:
+      # Single click: Increment Hour
+      - timing:
+          - ON for 50ms to 550ms
+          - OFF for at least 10ms
+        then:
+          - if:
+              condition:
+                - lambda: "return !id(minute_button)->state;"
+              then:
+                - rtttl.play: "short:d=4,o=5,b=100:16e6"
+                - lambda: "id(RingClock)->increment_hour();"
+                - pcf8563.write_time: rtc_time
+                - logger.log: "Hour incremented"
+      # Long press (Hold 1s): Start continuous increment
+      - timing:
+          - ON for at least 600ms
+        then:
+          - if:
+              condition:
+                - lambda: "return !id(minute_button)->state;"
+              then:
+                - lambda: |-
+                    id(hour_button_long_press) = true;
+      # Release handler for continuous increment
+      - timing:
+          - OFF for at least 50ms
+        then:
+          - lambda: |-
+              id(hour_button_long_press) = false;
+
+  # Minute Button (Physical)
+  # - Single Click: Increment Minute (if hour button not held)
+  # - Long Press (1s): Start continuous increment (if hour button not held)
+  - platform: gpio
+    id: minute_button
+    pin:
+      number: GPIO9
+      inverted: True
+      mode: INPUT_PULLUP
+    name: "Minute Button"
+    internal: true
+    filters:
+      - delayed_on_off: 50ms
+    on_press:
+      - lambda: "id(RingClock)->set_sntp_enabled(false);"
+      - switch.turn_off: sntp_switch
+    on_multi_click:
+      # Single click: Increment Minute
+      - timing:
+          - ON for 50ms to 550ms
+          - OFF for at least 10ms
+        then:
+          - if:
+              condition:
+                - lambda: "return !id(hour_button)->state;"
+              then:
+                - rtttl.play: "short:d=4,o=5,b=100:16e6"
+                - lambda: "id(RingClock)->increment_minute();"
+                - pcf8563.write_time: rtc_time
+                - logger.log: "Minute incremented"
+      # Long press (1s): Start continuous increment
+      - timing:
+          - ON for at least 600ms
+        then:
+          - if:
+              condition:
+                - lambda: "return !id(hour_button)->state;"
+              then:
+                - lambda: |-
+                    id(minute_button_long_press) = true;
+      # Release handler for continuous increment
+      - timing:
+          - OFF for at least 50ms
+        then:
+          - lambda: |-
+              id(minute_button_long_press) = false;
+
+  # Maintenance Mode (Chord: Hour + Minute)
+  # - Hold Both for 2s: Warning Sound
+  # - Release between 2-10s: SNTP On + Reboot
+  # - Hold Both for 10s: Factory Reset
+  - platform: template
+    id: maintenance_mode
+    name: "Maintenance Mode"
+    internal: true
+    lambda: |-
+      return id(hour_button)->state && id(minute_button)->state;
+    on_release:
+      # If we've held long enough to restart, but NOT long enough to reset
+      - if:
+          condition:
+            and:
+              - binary_sensor.is_on: restart_threshold
+              - binary_sensor.is_off: reset_threshold
+          then:
+            - switch.turn_on: sntp_switch
+            - rtttl.play: "reboot:d=16,o=6,b=120:c7,g6,e6,c6"
+            - delay: 500ms
+            - button.press: restart_esp
+
+  # Fires at the 2-second mark automatically
+  - platform: template
+    id: restart_threshold
+    internal: true
+    lambda: "return id(maintenance_mode)->state;"
+    filters: [delayed_on: 2s]
+    on_press:
+      - rtttl.play: "reboot:d=16,o=6,b=120:c7,g6,e6,c6"
+
+  # Fires at the 10-second mark automatically
+  - platform: template
+    id: reset_threshold
+    internal: true
+    lambda: "return id(maintenance_mode)->state;"
+    filters: [delayed_on: 10s]
+    on_press:
+      - rtttl.play: "reset:d=1,o=6,b=120:c"
+      - delay: 500ms
+      - button.press: delete_all_config
+
+interval:
+  # Polling loop for handling button "hold to increment" logic
+  - interval: 250ms
+    then:
+      - if:
+          condition:
+            - lambda: "return id(minute_button_long_press);"
+          then:
+            - lambda: "id(RingClock)->increment_minute();"
+            - pcf8563.write_time: rtc_time
+      - if:
+          condition:
+            - lambda: "return id(hour_button_long_press);"
+          then:
+            - lambda: "id(RingClock)->increment_hour();"
+            - pcf8563.write_time: rtc_time
+
+button:
+  # System Actions
+  - platform: restart
+    name: Restart
+    id: restart_esp
+    web_server:
+      sorting_group_id: sorting_system
+      sorting_weight: 2
+  - platform: factory_reset
+    name: Reset with Default Settings
+    id: delete_all_config
+    disabled_by_default: True
+    web_server:
+      sorting_group_id: sorting_system
+      sorting_weight: 3
+
+  # Consolidated Update Management
+  - platform: template
+    name: "Update Firmware"
+    id: update_firmware_button
+    web_server:
+      sorting_group_id: sorting_system
+      sorting_weight: 4
+    on_press:
+      then:
+        - logger.log: "Initiating firmware update process..."
+        - update.check: firmware_update
+        - delay: 3s # Allow time for manifest fetch and parsing
+        - if:
+            condition:
+              update.is_available: firmware_update
+            then:
+              - logger.log: "New version found! Starting Over-The-Air (OTA) update..."
+              - update.perform: firmware_update
+            else:
+              - logger.log: "No update available. Your clock is currently up to date."
+
+  # Buzzer
+  - platform: template
+    name: Buzzer
+    web_server:
+      sorting_group_id: sorting_alarm
+      sorting_weight: 5
+    on_press:
+      then:
+        - rtttl.play: notification:d=16,o=6,b=160:c,e,g,c7
+
+  # Timer Controls
+  - platform: template
+    name: "Start Timer"
+    id: start_timer_button
+    web_server:
+      sorting_group_id: sorting_timer
+      sorting_weight: 5
+    on_press:
+      then:
+        - lambda: |-
+            id(RingClock)->start_timer(id(timer_h), id(timer_m), id(timer_s));
+        - light.turn_on:
+            id: ring_light
+            effect: Timer
+
+  - platform: template
+    name: "Stop Timer"
+    id: stop_timer_button
+    web_server:
+      sorting_group_id: sorting_timer
+      sorting_weight: 6
+    on_press:
+      then:
+        - lambda: "id(RingClock)->stop_timer();"
+        - light.turn_on:
+            id: ring_light
+            effect: Clock
+
+  # Stopwatch Controls
+  - platform: template
+    name: "Start Stopwatch"
+    id: start_stopwatch_button
+    web_server:
+      sorting_group_id: sorting_timer
+      sorting_weight: 1
+    on_press:
+      then:
+        - lambda: "id(RingClock)->start_stopwatch();"
+        - light.turn_on:
+            id: ring_light
+            effect: Stopwatch
+
+  - platform: template
+    name: "Pause Stopwatch"
+    id: pause_stopwatch_button
+    web_server:
+      sorting_group_id: sorting_timer
+      sorting_weight: 2
+    on_press:
+      then:
+        - lambda: "id(RingClock)->pause_stopwatch();"
+
+  - platform: template
+    name: "Stop Stopwatch"
+    id: stop_stopwatch_button
+    web_server:
+      sorting_group_id: sorting_timer
+      sorting_weight: 3
+    on_press:
+      then:
+        - lambda: "id(RingClock)->stop_stopwatch();"
+        - light.turn_on:
+            id: ring_light
+            effect: Clock
+
+text:
+  - platform: template
+    name: "Timer Duration"
+    id: timer_duration
+    mode: text
+    optimistic: true
+    initial_value: "00:00:10"
+    web_server:
+      sorting_group_id: sorting_timer
+      sorting_weight: 4
+    on_value:
+      then:
+        - lambda: |-
+            std::string s = x;
+            if (s.empty()) return;
+
+            // Clean input: remove everything except digits and colons
+            std::string clean;
+            for (char c : s) {
+                if (isdigit(c) || c == ':') clean += c;
+            }
+
+            std::vector<int> parts;
+            std::string current;
+            for (char c : clean) {
+                if (c == ':') {
+                    if (!current.empty()) parts.push_back(std::stoi(current));
+                    current = "";
+                } else {
+                    current += c;
+                }
+            }
+            if (!current.empty()) parts.push_back(std::stoi(current));
+
+            int h = 0, m = 0, sec = 0;
+            if (parts.size() == 1) {
+                sec = parts[0];
+            } else if (parts.size() == 2) {
+                m = parts[0];
+                sec = parts[1];
+            } else if (parts.size() >= 3) {
+                h = parts[0];
+                m = parts[1];
+                sec = parts[2];
+            }
+
+            // Normalize (e.g. 90s -> 1m30s)
+            int total_seconds = h * 3600 + m * 60 + sec;
+            if (total_seconds < 0) total_seconds = 0;
+            if (total_seconds > 46799) total_seconds = 46799; // Cap at 12:59:59
+
+            id(timer_h) = total_seconds / 3600;
+            id(timer_m) = (total_seconds % 3600) / 60;
+            id(timer_s) = total_seconds % 60;
+
+            char buf[10];
+            sprintf(buf, "%02d:%02d:%02d", id(timer_h), id(timer_m), id(timer_s));
+            std::string formatted = buf;
+
+            if (formatted != s) {
+               auto call = id(timer_duration)->make_call();
+               call.set_value(formatted);
+               call.perform();
+            }
+
+number:
+  # Calibration controls for environmental sensors
+  - platform: template
+    name: "Ambient Min Threshold"
+    id: ambient_min_threshold
+    unit_of_measurement: "%"
+    step: 1
+    min_value: 0
+    max_value: 100
+    initial_value: 10
+    optimistic: true
+    restore_value: true
+    web_server:
+      sorting_group_id: sorting_clock
+      sorting_weight: 6
+    on_value:
+      then:
+        - script.execute: update_ring_light
+
+  - platform: template
+    name: "Ambient Max Threshold"
+    id: ambient_max_threshold
+    unit_of_measurement: "%"
+    step: 1
+    min_value: 0
+    max_value: 100
+    initial_value: 80
+    optimistic: true
+    restore_value: true
+    web_server:
+      sorting_group_id: sorting_clock
+      sorting_weight: 7
+    on_value:
+      then:
+        - script.execute: update_ring_light
+
+  # Calibration controls for environmental sensors
+  # Temperature Offset: Compensates for heat generated by internal electronics.
+  - platform: template
+    name: "Temperature Offset"
+    id: temp_offset
+    unit_of_measurement: "°C"
+    step: 0.1
+    mode: box
+    icon: mdi:thermometer-lines
+    initial_value: ${temp_offset_default}
+    optimistic: true
+    restore_value: true
+    min_value: -20.0
+    max_value: 20.0
+    disabled_by_default: True
+    web_server:
+      sorting_group_id: sorting_sensors
+      sorting_weight: 5
+    on_value:
+      then:
+        - component.update: aht_sensor
+
+  - platform: template
+    name: "Humidity Offset"
+    id: humidity_offset
+    unit_of_measurement: "%"
+    step: 1
+    mode: box
+    initial_value: ${humidity_offset_default}
+    optimistic: true
+    restore_value: true
+    min_value: -20
+    max_value: 20
+    disabled_by_default: True
+    web_server:
+      sorting_group_id: sorting_sensors
+      sorting_weight: 6
+    on_value:
+      then:
+        - component.update: aht_sensor
+
+  - platform: template
+    name: "Occupancy Cool-off"
+    id: occupancy_cooloff
+    unit_of_measurement: "s"
+    step: 1
+    mode: box
+    initial_value: ${occupancy_cooloff_default}
+    optimistic: true
+    restore_value: true
+    min_value: 0
+    max_value: 600
+    disabled_by_default: True
+    web_server:
+      sorting_group_id: sorting_sensors
+      sorting_weight: 7

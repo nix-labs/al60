@@ -1,0 +1,32 @@
+substitutions:
+  # Unique name for the device in Home Assistant and network
+  name: "al60"
+  # Friendly name displayed in UIs
+  friendly_name: "NIX labs AL60 Clock"
+  # Fallback Time Zone in case auto-detection fails
+  # Should be POSIX Timezone String
+  # Find yours here: https://github.com/nayarsystems/posix_tz_db/blob/master/zones.csv
+  time_zone: "AEST-10"
+
+esphome:
+  name: "${name}"
+  friendly_name: "${friendly_name}"
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+packages:
+  core: github://nix-labs/al60/packages/al60_core.yaml@main
+  time: github://nix-labs/al60/packages/al60_time.yaml@main
+  sensors: github://nix-labs/al60/packages/al60_sensors.yaml@main
+  inputs: github://nix-labs/al60/packages/al60_inputs.yaml@main
+  light: github://nix-labs/al60/packages/al60_light.yaml@main
+  # Optional: Enable full LD2410 UART radar integration (moving/still target sensors)
+  # radar: github://nix-labs/al60/packages/al60_radar.yaml@main
+
+external_components:
+  # The custom component driving the clock
+  - source: github://nix-labs/al60@main
+    components: [ring_clock]
+

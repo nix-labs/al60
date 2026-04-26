@@ -1,0 +1,129 @@
+# AL60 Sensors Package
+# Interfaces with hardware sensors (temperature, humidity, light, occupancy).
+
+substitutions:
+  # Default offsets to compensate for internal heat
+  # These can be adjusted via the web UI or Home Assistant
+  temp_offset_default: "-8"
+  humidity_offset_default: "0.0"
+  # Default radar cool-off period in seconds
+  occupancy_cooloff_default: "60"
+
+# I2C Bus Config (Used by RTC and Environmental Sensor)
+i2c:
+  scl: GPIO5
+  sda: GPIO6
+  scan: true
+
+sensor:
+  # AHT20 Temperature & Humidity Sensor
+  - platform: aht10
+    id: aht_sensor
+    variant: AHT20
+    address: 0x38
+    update_interval: 15s
+    temperature:
+      id: temp_sensor
+      name: "Temperature"
+      icon: mdi:thermometer
+      accuracy_decimals: 1
+      filters:
+        - lambda: return x + id(temp_offset)->state;
+      web_server:
+        sorting_group_id: sorting_sensors
+        sorting_weight: 1
+    humidity:
+      id: humidity_sensor
+      name: "Humidity"
+      icon: mdi:water-percent
+      accuracy_decimals: 0
+      filters:
+        - lambda: |-
+            // Get ambient (corrected) and raw (internal) temperature
+            float t_amb = id(temp_sensor)->state;
+            float t_raw = t_amb - id(temp_offset)->state;
+
+            if (std::isnan(t_amb) || std::isnan(x)) return std::max(0.0f, std::min(100.0f, x + id(humidity_offset)->state));
+
+            // Saturation Vapor Pressure formula (Magnus-Tetens)
+            auto esat = [](float t) {
+              return 6.112f * expf((17.67f * t) / (t + 243.5f));
+            };
+
+            // Correct RH based on the ratio of saturation vapor pressures
+            float rh_corr = x * (esat(t_raw) / esat(t_amb));
+
+            // Apply the manual trim offset on top of the physics-based correction
+            return std::max(0.0f, std::min(100.0f, rh_corr + id(humidity_offset)->state));
+      web_server:
+        sorting_group_id: sorting_sensors
+        sorting_weight: 2
+
+  # Light Sensor (ADC)
+  - platform: adc
+    pin: GPIO4
+    name: "Brightness"
+    id: brightness_sensor
+    icon: mdi:brightness-6
+    accuracy_decimals: 0
+    web_server:
+      sorting_group_id: sorting_sensors
+      sorting_weight: 4
+    attenuation: 12db
+    update_interval: 5s
+    unit_of_measurement: "%"
+    filters:
+      # Map raw voltage into a percentage
+      - calibrate_linear:
+          - 0.0 -> 0.0
+          - 3.0 -> 100.0
+      # Cap values above 3.0V at 100% (ADC can read slightly higher than calibrated max)
+      - clamp:
+          min_value: 0.0
+          max_value: 100.0
+      # Reject sudden blips (hands passing over, reflections, etc)
+      - median:
+          window_size: 7
+          send_every: 1
+      # Smoothly follow light levels without sudden jumps
+      - exponential_moving_average:
+          alpha: 0.1
+          send_every: 1
+    on_value:
+      then:
+        - script.execute: update_ring_light
+
+binary_sensor:
+  # LD2410 GPIO Occupancy Input
+  # Simple high/low output from the LD2410 OUT pin — always available.
+  # For full UART-based LD2410 integration (moving/still target sensors),
+  # add the al60_radar.yaml package to your config.
+  - platform: gpio
+    id: radar_occupancy
+    pin: GPIO3
+    name: "Occupancy"
+    web_server:
+      sorting_group_id: sorting_sensors
+      sorting_weight: 3
+    device_class: occupancy
+    icon: mdi:target-account
+    filters:
+      - delayed_off: !lambda "return id(occupancy_cooloff).state * 1000;"
+    on_press:
+      - script.execute: update_ring_light
+    on_release:
+      - script.execute: update_ring_light
+
+# System Output Hardware
+output:
+  # Buzzer connected to GPIO7
+  - platform: ledc
+    pin: GPIO7
+    id: buzzer
+
+# RTTTL (Ring Tone Text Transfer Language)
+# Used for playing melodies (alarms, notifications)
+rtttl:
+  output: buzzer
+  id: buzzer_rtttl
+  gain: 90%

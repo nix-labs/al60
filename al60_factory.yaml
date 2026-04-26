@@ -1,0 +1,49 @@
+substitutions:
+  name: "al60"
+  friendly_name: "NIX labs AL60 Clock"
+  version: "0.9.11"
+  time_zone: "AEST-10"
+
+esphome:
+  name: "${name}"
+  friendly_name: "${friendly_name}"
+  project:
+    name: "NIXlabs.AL60"
+    version: "${version}"
+
+packages:
+  # Using local paths for the GitHub Action Build
+  core: !include packages/al60_core.yaml
+  time: !include packages/al60_time.yaml
+  sensors: !include packages/al60_sensors.yaml
+  inputs: !include packages/al60_inputs.yaml
+  light: !include packages/al60_light.yaml
+  # Optional: Enable full LD2410 UART radar integration (moving/still target sensors)
+  # radar: !include packages/al60_radar.yaml
+
+dashboard_import:
+  package_import_url: github://nix-labs/al60/al60.yaml@main
+
+  import_full_config: true
+
+# Factory Overrides for Web Interface
+web_server:
+  id: web_ui
+  # Local embedding for factory units (Full offline support)
+  js_include: static/www.js
+  # Blank out the hosted URL
+  js_url: ""
+
+external_components:
+  # Using local paths for the GitHub Action Build
+  - source:
+      type: local
+      path: components
+    components: [ring_clock]
+
+# Bluetooth Provisioning
+esp32_improv:
+  authorizer: none
+
+# Serial Provisioning
+improv_serial:

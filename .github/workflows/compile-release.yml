@@ -1,0 +1,161 @@
+name: Compile Production Firmware
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install ESPHome and esptool
+        run: pip install esphome esptool
+
+      - name: Extract Production Version
+        id: get_version
+        run: |
+          RAW_VER=$(grep 'version:' al60_factory.yaml | head -n 1 | awk '{print $2}' | tr -d '"')
+          echo "firmware_version=$RAW_VER" >> "$GITHUB_OUTPUT"
+
+      - name: Compile Production Binary
+        run: esphome compile al60_factory.yaml
+
+      - name: Prepare Assets and Manifest
+        id: prepare_assets
+        run: |
+          mkdir -p public/firmware
+          mkdir -p public/static
+          BUILD_PATH=".esphome/build/al60/.pioenvs/al60"
+          V_NUM="${{ steps.get_version.outputs.firmware_version }}"
+
+          # 1. Process Production Firmware
+          cp $BUILD_PATH/firmware.bin public/firmware/al60_${V_NUM}_ota.bin
+          
+          esptool.py --chip esp32c3 merge_bin \
+            -o public/firmware/al60_${V_NUM}_factory.bin \
+            --flash_mode dio --flash_size 4MB \
+            0x0000 $BUILD_PATH/bootloader.bin \
+            0x8000 $BUILD_PATH/partitions.bin \
+            0xd000 $BUILD_PATH/ota_data_initial.bin \
+            0x10000 public/firmware/al60_${V_NUM}_ota.bin
+
+          MD5_OTA=$(md5sum public/firmware/al60_${V_NUM}_ota.bin | awk '{ print $1 }')
+
+          # 2. Create Production Manifest
+          cat <<EOF > public/firmware/manifest.json
+          {
+            "name": "NIX labs AL60",
+            "version": "$V_NUM",
+            "home_assistant_domain": "esphome",
+            "builds": [
+              {
+                "chipFamily": "ESP32-C3",
+                "parts": [
+                  { "path": "al60_${V_NUM}_factory.bin", "offset": 0 }
+                ],
+                "ota": {
+                  "path": "https://nix-labs.github.io/al60/firmware/al60_${V_NUM}_ota.bin",
+                  "md5": "$MD5_OTA",
+                  "release_url": "https://github.com/nix-labs/al60/releases/tag/v${V_NUM}",
+                  "summary": "Firmware update for NIX labs AL60 v${V_NUM}"
+                }
+              }
+            ]
+          }
+EOF
+
+          # 3. Create Production WebFlash Page
+          cat <<EOF > public/index.html
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="utf-8" />
+            <title>NIX labs AL60 | Installation</title>
+            <meta name="viewport" content="width=device-width, initial-scale=1" />
+            <script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
+            <style>
+              body { font-family: 'Inter', sans-serif; background: #101828; color: #f9fafb; margin: 0; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+              .container { max-width: 500px; width: 100%; padding: 2.5rem; text-align: center; }
+              h1 { color: #FF9100; font-family: 'Exo 2', sans-serif; margin-bottom: 0.5rem; }
+              .subtitle { color: #9ca3af; margin-bottom: 2.5rem; font-size: 0.9rem; }
+              .card { background: rgba(16, 24, 40, 0.8); border: 1px solid rgba(255, 145, 0, 0.2); border-radius: 16px; padding: 2rem; backdrop-filter: blur(8px); box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+              .card h2 { margin-top: 0; font-size: 1.4rem; color: #fff; margin-bottom: 1rem; }
+              .card p { color: #9ca3af; font-size: 0.95rem; margin-bottom: 2rem; line-height: 1.5; }
+              esp-web-install-button { --esp-tools-button-color: #FF9100; --esp-tools-button-text-color: #ffffff; }
+              .version-badge { display: inline-block; background: rgba(255, 145, 0, 0.1); color: #FF9100; padding: 0.25rem 0.75rem; border-radius: 20px; font-size: 0.75rem; font-weight: 700; margin-bottom: 1rem; }
+            </style>
+          </head>
+          <body>
+            <div class="container">
+              <h1>NIX labs AL60</h1>
+              <p class="subtitle">Official Installation Tool</p>
+              
+              <div class="card">
+                <div class="version-badge">v$V_NUM</div>
+                <h2>Production Firmware</h2>
+                <p>Flash the latest official firmware for your AL60 Ring Clock. This includes all features, animations, and the web interface.</p>
+                <esp-web-install-button manifest="./firmware/manifest.json"></esp-web-install-button>
+              </div>
+
+              <div style="margin-top: 3rem; color: #4b5563; font-size: 0.75rem;">
+                © 2026 NIX labs
+              </div>
+            </div>
+          </body>
+          </html>
+EOF
+
+          # 4. Bake the version into al60.yaml for end-user remote package imports
+          cp al60.yaml public/al60.yaml
+          sed -i 's/v\${version}/v'"$V_NUM"'/g' public/al60.yaml
+          cp -r static/* public/static/
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          V_NUM="v${{ steps.get_version.outputs.firmware_version }}"
+          gh release create "$V_NUM" \
+            public/firmware/*.bin \
+            public/firmware/manifest.json \
+            --title "Release $V_NUM" \
+            --notes "Automated production firmware build for $V_NUM" \
+            --generate-notes
+
+      - name: Upload Pages Artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: ./public
+
+  deploy-pages:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5
+

@@ -1,0 +1,606 @@
+# AL60 Light Package
+# Configures the addressable LED rings, visual effects, and color customization controls.
+
+esphome:
+  on_boot:
+    # Restore brightness and last used effect on boot
+    - priority: 300
+      then:
+        - script.execute: update_ring_light
+        - lambda: |-
+            auto call = id(ring_light)->turn_on();
+            call.set_effect(id(last_clock_effect));
+            call.perform();
+    # Restore the last active sensor notification effect (if any)
+    # notification_color uses RESTORE_DEFAULT_OFF so its effect is lost on reboot;
+    # last_sensor_effect (NVS-persisted int) acts as the source of truth.
+    - priority: 290
+      then:
+        - lambda: |-
+            static const char* effects[] = {
+              nullptr,                      // 0 = none
+              "Sensors: Dual Bars",         // 1
+              "Sensors: Temperature Bar",   // 2
+              "Sensors: Humidity Bar",      // 3
+              "Sensors: Dual Ticks",        // 4
+              "Sensors: Temperature Tick",  // 5
+              "Sensors: Humidity Tick",     // 6
+              "Sensors: Dual Glow",         // 7
+              "Sensors: Temperature Glow",  // 8
+              "Sensors: Humidity Glow",     // 9
+            };
+            int idx = id(last_sensor_effect);
+            if (idx >= 1 && idx <= 9) {
+              auto call = id(notification_color)->turn_on();
+              call.set_effect(effects[idx]);
+              call.perform();
+            }
+    # First-boot: initialise hand colours to defaults if not previously set
+    - priority: 250
+      then:
+        - if:
+            condition:
+              lambda: "return !id(colours_initialized);"
+            then:
+              - lambda: |-
+                  // Hour: Orange (255, 145, 0)
+                  auto h = id(hour_hand_color)->turn_on();
+                  h.set_effect((uint32_t)0);
+                  h.set_red(255/255.0f); h.set_green(145/255.0f); h.set_blue(0.0f); h.set_brightness(1.0f); h.set_color_brightness(1.0f); h.perform();
+                  // Minute: Cyan (0, 255, 255)
+                  auto m = id(minute_hand_color)->turn_on();
+                  m.set_effect((uint32_t)0);
+                  m.set_red(0.0f); m.set_green(1.0f); m.set_blue(1.0f); m.set_brightness(1.0f); m.set_color_brightness(1.0f); m.perform();
+                  // Second: White (200, 200, 200)
+                  auto s = id(second_hand_color)->turn_on();
+                  s.set_effect((uint32_t)0);
+                  s.set_red(1.0f); s.set_green(1.0f); s.set_blue(1.0f); s.set_brightness(200/255.0f); s.set_color_brightness(1.0f); s.perform();
+                  // Markers: Dim White (50, 50, 50)
+                  auto mk = id(marker_color)->turn_on();
+                  mk.set_effect((uint32_t)0);
+                  mk.set_red(1.0f); mk.set_green(1.0f); mk.set_blue(1.0f); mk.set_brightness(50/255.0f); mk.set_color_brightness(1.0f); mk.perform();
+              - globals.set:
+                  id: colours_initialized
+                  value: "true"
+
+number:
+  # Brightness slider for Active/Occupancy detected state
+  - platform: template
+    id: standard_percentage
+    name: "Standard Brightness Percentage"
+    optimistic: True
+    restore_value: True
+    unit_of_measurement: "%"
+    initial_value: 50
+    min_value: 1
+    max_value: 100
+    step: 1
+    web_server:
+      sorting_group_id: sorting_clock
+      sorting_weight: 4
+
+  # Brightness slider for Inactive/No Occupancy state
+  - platform: template
+    id: low_percentage
+    name: "Low or Off Brightness Percentage"
+    optimistic: True
+    restore_value: True
+    unit_of_measurement: "%"
+    initial_value: 25
+    min_value: 1
+    max_value: 100
+    step: 1
+    web_server:
+      sorting_group_id: sorting_clock
+      sorting_weight: 5
+
+# Custom Component: Ring Clock Logic
+# Links sensors, inputs, and lights together
+ring_clock:
+  # Core components
+  id: RingClock
+  time_id: sntp_time
+  light_id: ring_light
+  # Display settings
+  hour_sweep_switch: hour_sweep
+  # Color pointers for customisation
+  hour_hand_color: hour_hand_color
+  minute_hand_color: minute_hand_color
+  second_hand_color: second_hand_color
+  marker_color: marker_color
+  notification_color: notification_color
+  # Sensors
+  sound_enabled_switch: timer_sounds
+  temperature_sensor: temp_sensor
+  humidity_sensor: humidity_sensor
+
+  # Sensor Color Ranges
+  temperature_colors:
+    - { value: -10.0, color: [26, 22, 73] }
+    - { value: 0.0, color: [18, 94, 131] }
+    - { value: 10.0, color: [60, 157, 116] }
+    - { value: 20.0, color: [207, 216, 113] }
+    - { value: 30.0, color: [223, 158, 60] }
+    - { value: 40.0, color: [193, 59, 44] }
+    - { value: 50.0, color: [136, 26, 23] }
+  humidity_colors:
+    - { value: 0.0, color: [190, 155, 47] }
+    - { value: 30.0, color: [160, 195, 27] }
+    - { value: 70.0, color: [60, 215, 127] }
+    - { value: 100.0, color: [20, 95, 227] }
+
+  # Event Handlers (Logic)
+  on_ready:
+    then:
+      - script.execute: update_ring_light
+      - lambda: |-
+          auto call = id(ring_light)->turn_on();
+          call.set_effect(id(last_clock_effect));
+          call.perform();
+
+          // Initialise marker highlight from restored effect
+          std::string m_effect = id(marker_color)->get_effect_name();
+          if (m_effect == "Highlight 12 Marker") {
+            id(RingClock)->set_marker_highlight_mode(ring_clock::MarkerHighlightMode::TWELVE_ONLY);
+          } else if (m_effect == "Highlight 12, 3, 6, 9 Markers") {
+            id(RingClock)->set_marker_highlight_mode(ring_clock::MarkerHighlightMode::TWELVE_THREE_SIX_NINE);
+          } else {
+            id(RingClock)->set_marker_highlight_mode(ring_clock::MarkerHighlightMode::NONE);
+          }
+  on_alarm_triggered:
+    then:
+      - if:
+          condition:
+            - switch.is_on: alarm_sound
+          then:
+            - rtttl.play: "alarm:d=16,o=6,b=140:c,e,g,c7,g,e,c,g,e,g,b,e7,b,g,e,b,4c7,p,4c7,p,4c7,p"
+  on_timer_finished:
+    then:
+      - rtttl.play: "timer_alert:d=16,o=6,b=120:c,e,g,c7,p,g,e,c,p,c,e,g,c7,p,g,e,c,p,8c7,p,8c7,p,8c7"
+      - delay: 10s
+      - lambda: |-
+          auto call = id(ring_light)->turn_on();
+          call.set_effect(id(last_clock_effect));
+          call.perform();
+  on_stopwatch_minute:
+    then:
+      - rtttl.play: "chime:d=16,o=6,b=120:c"
+  on_timer_started:
+    then:
+      - rtttl.play: "timer_start:d=16,o=6,b=120:c,e,g"
+  on_timer_stopped:
+    then:
+      - rtttl.play: "timer_stop:d=16,o=6,b=120:g,e,c"
+  on_stopwatch_started:
+    then:
+      - rtttl.play: "sw_start:d=16,o=6,b=120:c7"
+  on_stopwatch_paused:
+    then:
+      - rtttl.play: "sw_pause:d=16,o=6,b=120:c7,p,c7"
+  on_stopwatch_reset:
+    then:
+      - rtttl.play: "sw_reset:d=16,o=6,b=120:c,d,e,f,g"
+
+script:
+  - id: update_ring_light
+    mode: restart # Restart if called again quickly
+    then:
+      - lambda: |-
+          // Do not override the light state if it has been turned off.
+          // This allows Home Assistant automations (e.g. night schedules) to
+          // turn the light off and have it stay off until explicitly turned back on.
+          if (!id(ring_light)->remote_values.is_on()) return;
+
+          std::string mode = id(light_control_mode)->current_option();
+
+          static std::string last_mode = "";
+          bool mode_changed = (mode != last_mode);
+          last_mode = mode;
+
+          float min_a = id(ambient_min_threshold)->state;
+          float max_a = id(ambient_max_threshold)->state;
+          float curr_a = id(brightness_sensor)->state;
+          float min_b = id(low_percentage)->state;
+          float max_b = id(standard_percentage)->state;
+
+          // Pre-calculate ambient response
+          float clamped_a = std::max(min_a, std::min(max_a, curr_a));
+          float range_a = max_a - min_a;
+          float ratio = (range_a <= 0) ? 1.0f : (clamped_a - min_a) / range_a;
+          float ambient_target = min_b + ratio * (max_b - min_b);
+
+          float target_pct = max_b;
+
+          if (mode == "Ambient Brightness") {
+            target_pct = ambient_target;
+          } else if (mode == "Motion Detection") {
+            target_pct = id(radar_occupancy)->state ? max_b : min_b;
+          } else if (mode == "Motion Ambient Brightness") {
+            // Motion detected: follow ambient. No motion: low percentage.
+            target_pct = id(radar_occupancy)->state ? ambient_target : min_b;
+          } else {
+            // Manual mode: disengage component brightness management so the
+            // HA slider controls ring_light.brightness directly without interference.
+            if (!mode_changed) return;
+            id(RingClock)->set_target_brightness(-1.0f);
+            return;
+          }
+
+          // Hand brightness management over to the component, which steps
+          // smoothly at BRIGHTNESS_SPEED (0.5 units/s) toward the new target.
+          // No ring_light.turn_on() here — the component calls it from loop()
+          // only when the value actually changes, bounded to BRIGHTNESS_STEP_MS.
+          id(RingClock)->set_target_brightness(target_pct / 100.0f);
+
+light:
+  # Main LED Rings Configuration (WS2812)
+  - id: ring_light
+    name: "Ring Light Mode"
+    platform: esp32_rmt_led_strip
+    max_refresh_rate: 25ms
+    rgb_order: GRB
+    chipset: ws2812
+    pin: GPIO10
+    num_leds: 108
+    gamma_correct: 2.2
+    # WARNING: High brightness draws significant current.
+    # Increasing these values above 75% will exceed the devices electrical current limits and may cause overheating and physical damage
+    color_correct: [75%, 75%, 75%]
+    web_server:
+      sorting_group_id: sorting_clock
+      sorting_weight: 1
+    on_state:
+      - lambda: |-
+          if (id(ring_light)->remote_values.is_on()) {
+            std::string effect = id(ring_light)->get_effect_name();
+
+            // When turned on with no active effect, restore the last clock effect.
+            // This handles the case where the user toggles the light off then on
+            // via the web UI or Home Assistant — ESPHome turns it on with "None"
+            // by default. The subsequent on_state call will have a real effect name.
+            if (effect == "None") {
+              auto call = id(ring_light)->turn_on();
+              call.set_effect(id(last_clock_effect));
+              call.perform();
+              return;
+            }
+
+            static std::string last_effect = "";
+            bool effect_changed = (effect != last_effect);
+            last_effect = effect;
+
+            // Store the active "Clock" effect for reboot restoration
+            // Ignore temporary effects like Timer or Stopwatch
+            if (effect == "Clock" || effect == "Clock (Fade)" || effect == "Clock (Tail)" ||
+                effect == "Clock (Rainbow Tail)" || effect == "Clock (RGB)" || effect == "Clock (Mono)") {
+              id(last_clock_effect) = effect;
+            }
+
+            if (effect_changed) {
+              auto set_hand = [](light::LightState* ls, uint8_t r, uint8_t g, uint8_t b, float br = 1.0f) {
+                if (ls->get_effect_name().str() != "None") {
+                  auto clear = ls->turn_on();
+                  clear.set_effect((uint32_t)0);
+                  clear.perform();
+                }
+                auto call = ls->turn_on();
+                call.set_red(r / 255.0f); 
+                call.set_green(g / 255.0f); 
+                call.set_blue(b / 255.0f);
+                call.set_color_brightness(1.0f);
+                call.set_brightness(br);
+                call.set_transition_length(0); // Instant transition for hand colors.
+                call.perform();
+              };
+              auto set_rainbow = [](light::LightState* ls) {
+                auto call = ls->turn_on(); call.set_effect("Rainbow"); call.perform();
+              };
+
+              if (effect == "Clock" || effect == "Clock (Fade)" || effect == "Clock (Tail)") {
+                set_hand(id(hour_hand_color), 255, 145, 0);
+                set_hand(id(minute_hand_color), 0, 255, 255);
+                set_hand(id(second_hand_color), 255, 255, 255, 200/255.0f);
+                set_hand(id(marker_color), 255, 255, 255, 50/255.0f);
+              } else if (effect == "Clock (Rainbow Tail)") {
+                set_rainbow(id(hour_hand_color));
+                set_rainbow(id(minute_hand_color));
+                set_rainbow(id(second_hand_color));
+                set_hand(id(marker_color), 255, 255, 255, 50/255.0f);
+              } else if (effect == "Clock (RGB)") {
+                set_hand(id(hour_hand_color), 255, 0, 0);
+                set_hand(id(minute_hand_color), 0, 255, 0);
+                set_hand(id(second_hand_color), 0, 0, 255);
+                set_hand(id(marker_color), 255, 255, 255, 50/255.0f);
+              } else if (effect == "Clock (Mono)") {
+                set_hand(id(hour_hand_color), 255, 255, 255, 1.0f);
+                set_hand(id(minute_hand_color), 255, 255, 255, 100/255.0f);
+                set_hand(id(second_hand_color), 255, 255, 255, 40/255.0f);
+                set_hand(id(marker_color), 255, 255, 255, 10/255.0f);
+              }
+            }
+          }
+    effects:
+      # Standard clock display updated every 200ms.
+      - addressable_lambda:
+          name: Clock
+          update_interval: 200ms
+          lambda: |-
+            id(RingClock)->set_state(ring_clock::state::time);
+            id(RingClock)->addressable_lights_lambdacall(it);
+      # Smooth fading effect updated at 25 frames per second.
+      - addressable_lambda:
+          name: "Clock (Fade)"
+          update_interval: 40ms
+          lambda: |-
+            id(RingClock)->set_state(ring_clock::state::time_fade);
+            id(RingClock)->addressable_lights_lambdacall(it);
+      # 15-LED Trailing Seconds (25fps)
+      - addressable_lambda:
+          name: "Clock (Tail)"
+          update_interval: 40ms
+          lambda: |-
+            id(RingClock)->set_state(ring_clock::state::time_tail);
+            id(RingClock)->addressable_lights_lambdacall(it);
+      # 15-LED Trailing Seconds with Rainbow colours on all hands (25fps)
+      - addressable_lambda:
+          name: "Clock (Rainbow Tail)"
+          update_interval: 40ms
+          lambda: |-
+            id(RingClock)->set_state(ring_clock::state::time_tail);
+            id(RingClock)->addressable_lights_lambdacall(it);
+      # RGB Theme (hand colours set by mode button)
+      - addressable_lambda:
+          name: "Clock (RGB)"
+          update_interval: 200ms
+          lambda: |-
+            id(RingClock)->set_state(ring_clock::state::time);
+            id(RingClock)->addressable_lights_lambdacall(it);
+      # Monochromatic Theme (hand colours set by mode button)
+      - addressable_lambda:
+          name: "Clock (Mono)"
+          update_interval: 200ms
+          lambda: |-
+            id(RingClock)->set_state(ring_clock::state::time);
+            id(RingClock)->addressable_lights_lambdacall(it);
+      # Timer Visuals
+      - addressable_lambda:
+          name: "Timer"
+          update_interval: 100ms
+          lambda: |-
+            id(RingClock)->set_state(ring_clock::state::timer);
+            id(RingClock)->addressable_lights_lambdacall(it);
+      # Stopwatch Visuals
+      - addressable_lambda:
+          name: "Stopwatch"
+          update_interval: 100ms
+          lambda: |-
+            id(RingClock)->set_state(ring_clock::state::stopwatch);
+            id(RingClock)->addressable_lights_lambdacall(it);
+
+  # Customisation Keys: Hands
+  # These are dummy lights that allow the user to pick colors in the UI
+  - platform: rgb
+    id: hour_hand_color
+    name: "Hour Hand"
+    restore_mode: RESTORE_DEFAULT_ON
+    default_transition_length: 0ms # Virtual light for color selection.
+    red: output_hour_red
+    green: output_hour_green
+    blue: output_hour_blue
+    gamma_correct: 1.0
+    web_server:
+      sorting_group_id: sorting_clock_led
+      sorting_weight: 1
+    effects:
+      - automation:
+          name: "Rainbow"
+          sequence: []
+      - automation:
+          name: "Temperature Color"
+          sequence: []
+      - automation:
+          name: "Humidity Color"
+          sequence: []
+
+  - platform: rgb
+    id: minute_hand_color
+    name: "Minute Hand"
+    restore_mode: RESTORE_DEFAULT_ON
+    default_transition_length: 0ms # Virtual light for color selection.
+    red: output_minute_red
+    green: output_minute_green
+    blue: output_minute_blue
+    gamma_correct: 1.0
+    web_server:
+      sorting_group_id: sorting_clock_led
+      sorting_weight: 2
+    effects:
+      - automation:
+          name: "Rainbow"
+          sequence: []
+      - automation:
+          name: "Temperature Color"
+          sequence: []
+      - automation:
+          name: "Humidity Color"
+          sequence: []
+
+  - platform: rgb
+    id: second_hand_color
+    name: "Second Hand"
+    restore_mode: RESTORE_DEFAULT_ON
+    default_transition_length: 0ms # Virtual light for color selection.
+    red: output_second_red
+    green: output_second_green
+    blue: output_second_blue
+    gamma_correct: 1.0
+    web_server:
+      sorting_group_id: sorting_clock_led
+      sorting_weight: 3
+    effects:
+      - automation:
+          name: "Rainbow"
+          sequence: []
+      - automation:
+          name: "Temperature Color"
+          sequence: []
+      - automation:
+          name: "Humidity Color"
+          sequence: []
+
+  # Customisation Keys: Markers
+  - platform: rgb
+    id: marker_color
+    name: "Markers"
+    restore_mode: RESTORE_DEFAULT_ON
+    default_transition_length: 0ms # Virtual light for color selection.
+    red: output_marker_red
+    green: output_marker_green
+    blue: output_marker_blue
+    gamma_correct: 1.0
+    web_server:
+      sorting_group_id: sorting_clock_led
+      sorting_weight: 4
+    on_state:
+      - lambda: |-
+          std::string effect = id(marker_color)->get_effect_name();
+          if (effect == "Highlight 12 Marker") {
+            id(RingClock)->set_marker_highlight_mode(ring_clock::MarkerHighlightMode::TWELVE_ONLY);
+          } else if (effect == "Highlight 12, 3, 6, 9 Markers") {
+            id(RingClock)->set_marker_highlight_mode(ring_clock::MarkerHighlightMode::TWELVE_THREE_SIX_NINE);
+          } else {
+            // Includes "None" and "Random"
+            id(RingClock)->set_marker_highlight_mode(ring_clock::MarkerHighlightMode::NONE);
+          }
+    effects:
+      - automation:
+          name: "Temperature Color"
+          sequence: []
+      - automation:
+          name: "Humidity Color"
+          sequence: []
+      - automation:
+          name: "Highlight 12 Marker"
+          sequence: []
+      - automation:
+          name: "Highlight 12, 3, 6, 9 Markers"
+          sequence: []
+      - random:
+
+  # Customisation Keys: Notification/Background
+  - platform: rgb
+    id: notification_color
+    name: "Notification"
+    restore_mode: RESTORE_DEFAULT_OFF
+    default_transition_length: 0ms # Virtual light for color selection.
+    red: output_notification_red
+    green: output_notification_green
+    blue: output_notification_blue
+    gamma_correct: 1.0
+    web_server:
+      sorting_group_id: sorting_clock_led
+      sorting_weight: 5
+    effects:
+      - random:
+      - pulse:
+          name: "Fast Pulse"
+          transition_length: 0.5s
+          update_interval: 0.5s
+          min_brightness: 50%
+          max_brightness: 100%
+      - pulse:
+          name: "Slow Pulse"
+          transition_length: 500ms
+          update_interval: 2s
+      # Custom animations triggered by sensors
+      - automation:
+          name: "Sensors: Dual Bars"
+          sequence: []
+      - automation:
+          name: "Sensors: Temperature Bar"
+          sequence: []
+      - automation:
+          name: "Sensors: Humidity Bar"
+          sequence: []
+      - automation:
+          name: "Sensors: Dual Ticks"
+          sequence: []
+      - automation:
+          name: "Sensors: Temperature Tick"
+          sequence: []
+      - automation:
+          name: "Sensors: Humidity Tick"
+          sequence: []
+      - automation:
+          name: "Sensors: Dual Glow"
+          sequence: []
+      - automation:
+          name: "Sensors: Temperature Glow"
+          sequence: []
+      - automation:
+          name: "Sensors: Humidity Glow"
+          sequence: []
+
+output:
+  # "Dummy" outputs needed to bind the RGB lights above
+  # They don't control hardware directly
+  - platform: template
+    id: output_hour_red
+    type: float
+    write_action: {}
+  - platform: template
+    id: output_hour_green
+    type: float
+    write_action: {}
+  - platform: template
+    id: output_hour_blue
+    type: float
+    write_action: {}
+  - platform: template
+    id: output_minute_red
+    type: float
+    write_action: {}
+  - platform: template
+    id: output_minute_green
+    type: float
+    write_action: {}
+  - platform: template
+    id: output_minute_blue
+    type: float
+    write_action: {}
+  - platform: template
+    id: output_second_red
+    type: float
+    write_action: {}
+  - platform: template
+    id: output_second_green
+    type: float
+    write_action: {}
+  - platform: template
+    id: output_second_blue
+    type: float
+    write_action: {}
+  - platform: template
+    id: output_marker_red
+    type: float
+    write_action: {}
+  - platform: template
+    id: output_marker_green
+    type: float
+    write_action: {}
+  - platform: template
+    id: output_marker_blue
+    type: float
+    write_action: {}
+  - platform: template
+    id: output_notification_red
+    type: float
+    write_action: {}
+  - platform: template
+    id: output_notification_green
+    type: float
+    write_action: {}
+  - platform: template
+    id: output_notification_blue
+    type: float
+    write_action: {}

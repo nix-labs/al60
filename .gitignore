@@ -1,0 +1,6 @@
+.DS_Store
+.esphome/
+components/ring_clock/__pycache__/
+tmp_esphome_webserver/
+tmp_esphome_webserver
+

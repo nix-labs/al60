@@ -1,0 +1,310 @@
+# AL60 Radar Package
+#
+# Integrates the LD2410 mmWave radar sensor via UART.
+# Provides primary occupancy detection and advanced gate-level tuning.
+
+uart:
+  id: uart_bus
+  baud_rate: 256000
+  tx_pin: GPIO0
+  rx_pin: GPIO1
+  parity: NONE
+  stop_bits: 1
+
+ld2410:
+  id: radar
+
+# --- Primary Detection Sensors ---
+# Use these for standard smart home automations.
+binary_sensor:
+  - platform: ld2410
+    # Reports true only if movement is detected.
+    has_moving_target:
+      id: radar_moving
+      name: Moving Target
+      web_server:
+        sorting_group_id: sorting_sensors
+        sorting_weight: 8
+        
+    # Reports true for stationary targets (e.g., someone sleeping).
+    has_still_target:
+      id: radar_still
+      name: Still Target
+      web_server:
+        sorting_group_id: sorting_sensors
+        sorting_weight: 9
+
+    # Reports true if ANY target (moving or still) is detected.
+    has_target:
+      id: radar_uart_presence
+      name: Radar Presence
+      web_server:
+        sorting_group_id: sorting_sensors
+        sorting_weight: 10
+        
+    # Status of the physical OUT pin (requires Engineering Mode).
+    out_pin_presence_status:
+      id: radar_out_pin_status
+      name: Radar OUT Pin Status
+      web_server:
+        sorting_group_id: sorting_sensors
+        sorting_weight: 11
+
+# --- Raw Data Sensors ---
+# Real-time measurements. Useful for mapping your room layout.
+sensor:
+  - platform: ld2410
+    moving_distance:
+      id: radar_moving_distance
+      name: Radar Moving Distance
+      web_server:
+        sorting_group_id: sorting_sensors
+        sorting_weight: 12
+    still_distance:
+      id: radar_still_distance
+      name: Radar Still Distance
+      web_server:
+        sorting_group_id: sorting_sensors
+        sorting_weight: 13
+    moving_energy:
+      id: radar_moving_energy
+      name: Radar Move Energy
+      web_server:
+        sorting_group_id: sorting_sensors
+        sorting_weight: 14
+    still_energy:
+      id: radar_still_energy
+      name: Radar Still Energy
+      web_server:
+        sorting_group_id: sorting_sensors
+        sorting_weight: 15
+    detection_distance:
+      id: radar_detection_distance
+      name: Radar Detection Distance
+      web_server:
+        sorting_group_id: sorting_sensors
+        sorting_weight: 16
+    light:
+      id: radar_light
+      name: Radar Light Sensor
+      web_server:
+        sorting_group_id: sorting_sensors
+        sorting_weight: 17
+
+# --- Mode Switches ---
+switch:
+  - platform: ld2410
+    # Must be ON to receive raw gate energy values.
+    engineering_mode:
+      id: radar_engineering_mode
+      name: Radar Engineering Mode
+      web_server:
+        sorting_group_id: sorting_sensors
+        sorting_weight: 18
+    # Turn off to stop Bluetooth broadcasting (reduces noise).
+    bluetooth:
+      id: radar_bluetooth
+      name: Radar Bluetooth
+      web_server:
+        sorting_group_id: sorting_sensors
+        sorting_weight: 19
+
+# --- Hardware Selects ---
+select:
+  - platform: ld2410
+    # Set to 0.2m for fine granularity, 0.75m for max range.
+    distance_resolution:
+      id: radar_distance_resolution
+      name: Radar Distance Resolution
+      web_server:
+        sorting_group_id: sorting_sensors
+        sorting_weight: 20
+    light_function:
+      id: radar_light_function
+      name: Radar Light Function
+      web_server:
+        sorting_group_id: sorting_sensors
+        sorting_weight: 21
+    out_pin_level:
+      id: radar_out_pin_level
+      name: Radar Out Pin Level
+      web_server:
+        sorting_group_id: sorting_sensors
+        sorting_weight: 22
+
+# --- Advanced Tuning Parameters ---
+# Adjust these to eliminate false positives (e.g., fans, pets).
+# Gates roughly correspond to distance ranges (Resolution x Gate Number).
+number:
+  - platform: ld2410
+    # Hold-time after motion stops before reporting clear.
+    timeout:
+      id: radar_timeout
+      name: Radar Timeout
+      web_server:
+        sorting_group_id: sorting_sensors
+        sorting_weight: 23
+        
+    light_threshold:
+      id: radar_light_threshold
+      name: Radar Light Threshold
+      web_server:
+        sorting_group_id: sorting_sensors
+        sorting_weight: 24
+        
+    # Ignore movement beyond this gate.
+    max_move_distance_gate:
+      id: radar_max_move_distance_gate
+      name: Radar Max Move Distance Gate
+      web_server:
+        sorting_group_id: sorting_sensors
+        sorting_weight: 25
+        
+    # Ignore still targets beyond this gate.
+    max_still_distance_gate:
+      id: radar_max_still_distance_gate
+      name: Radar Max Still Distance Gate
+      web_server:
+        sorting_group_id: sorting_sensors
+        sorting_weight: 26
+        
+    # Gate Thresholds (0-100). Higher = less sensitive.
+    g0:
+      move_threshold:
+        id: radar_g0_move_threshold
+        name: Radar G0 Move Threshold
+        web_server:
+          sorting_group_id: sorting_sensors
+          sorting_weight: 27
+      still_threshold:
+        id: radar_g0_still_threshold
+        name: Radar G0 Still Threshold
+        web_server:
+          sorting_group_id: sorting_sensors
+          sorting_weight: 28
+    g1:
+      move_threshold:
+        id: radar_g1_move_threshold
+        name: Radar G1 Move Threshold
+        web_server:
+          sorting_group_id: sorting_sensors
+          sorting_weight: 29
+      still_threshold:
+        id: radar_g1_still_threshold
+        name: Radar G1 Still Threshold
+        web_server:
+          sorting_group_id: sorting_sensors
+          sorting_weight: 30
+    g2:
+      move_threshold:
+        id: radar_g2_move_threshold
+        name: Radar G2 Move Threshold
+        web_server:
+          sorting_group_id: sorting_sensors
+          sorting_weight: 31
+      still_threshold:
+        id: radar_g2_still_threshold
+        name: Radar G2 Still Threshold
+        web_server:
+          sorting_group_id: sorting_sensors
+          sorting_weight: 32
+    g3:
+      move_threshold:
+        id: radar_g3_move_threshold
+        name: Radar G3 Move Threshold
+        web_server:
+          sorting_group_id: sorting_sensors
+          sorting_weight: 33
+      still_threshold:
+        id: radar_g3_still_threshold
+        name: Radar G3 Still Threshold
+        web_server:
+          sorting_group_id: sorting_sensors
+          sorting_weight: 34
+    g4:
+      move_threshold:
+        id: radar_g4_move_threshold
+        name: Radar G4 Move Threshold
+        web_server:
+          sorting_group_id: sorting_sensors
+          sorting_weight: 35
+      still_threshold:
+        id: radar_g4_still_threshold
+        name: Radar G4 Still Threshold
+        web_server:
+          sorting_group_id: sorting_sensors
+          sorting_weight: 36
+    g5:
+      move_threshold:
+        id: radar_g5_move_threshold
+        name: Radar G5 Move Threshold
+        web_server:
+          sorting_group_id: sorting_sensors
+          sorting_weight: 37
+      still_threshold:
+        id: radar_g5_still_threshold
+        name: Radar G5 Still Threshold
+        web_server:
+          sorting_group_id: sorting_sensors
+          sorting_weight: 38
+    g6:
+      move_threshold:
+        id: radar_g6_move_threshold
+        name: Radar G6 Move Threshold
+        web_server:
+          sorting_group_id: sorting_sensors
+          sorting_weight: 39
+      still_threshold:
+        id: radar_g6_still_threshold
+        name: Radar G6 Still Threshold
+        web_server:
+          sorting_group_id: sorting_sensors
+          sorting_weight: 40
+    g7:
+      move_threshold:
+        id: radar_g7_move_threshold
+        name: Radar G7 Move Threshold
+        web_server:
+          sorting_group_id: sorting_sensors
+          sorting_weight: 41
+      still_threshold:
+        id: radar_g7_still_threshold
+        name: Radar G7 Still Threshold
+        web_server:
+          sorting_group_id: sorting_sensors
+          sorting_weight: 42
+    g8:
+      move_threshold:
+        id: radar_g8_move_threshold
+        name: Radar G8 Move Threshold
+        web_server:
+          sorting_group_id: sorting_sensors
+          sorting_weight: 43
+      still_threshold:
+        id: radar_g8_still_threshold
+        name: Radar G8 Still Threshold
+        web_server:
+          sorting_group_id: sorting_sensors
+          sorting_weight: 44
+
+# --- Action Buttons ---
+button:
+  - platform: ld2410
+    factory_reset:
+      id: radar_factory_reset
+      name: Radar Factory Reset
+      web_server:
+        sorting_group_id: sorting_system
+        sorting_weight: 5
+    restart:
+      id: radar_restart_button
+      name: Radar Restart
+      web_server:
+        sorting_group_id: sorting_system
+        sorting_weight: 6
+    query_params:
+      id: radar_query_params
+      name: Radar Query Params
+      web_server:
+        sorting_group_id: sorting_system
+        sorting_weight: 7
