@@ -1,7 +1,7 @@
 substitutions:
   name: "al60"
   friendly_name: "NIX labs AL60 Clock"
-  version: "0.9.11"
+  version: "0.9.0"
   time_zone: "AEST-10"
 
 esphome:
@@ -18,8 +18,6 @@ packages:
   sensors: !include packages/al60_sensors.yaml
   inputs: !include packages/al60_inputs.yaml
   light: !include packages/al60_light.yaml
-  # Optional: Enable full LD2410 UART radar integration (moving/still target sensors)
-  # radar: !include packages/al60_radar.yaml
 
 dashboard_import:
   package_import_url: github://nix-labs/al60/al60.yaml@main
