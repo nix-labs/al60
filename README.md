@@ -32,7 +32,7 @@ ring_clock:
   id: RingClock
   # Replace all IDs below with your own
   time_id: sntp_time
-  light_id: ring_light
+  light_id: master_light
   hour_sweep_switch: hour_sweep
   hour_hand_color: hour_hand_color
   minute_hand_color: minute_hand_color

@@ -58,7 +58,7 @@ variables:
   device_id: !input clock_device
   # Check if manual input exists; if not, search the device for the entity
   input_light: !input manual_light
-  clock_light: "{{ input_light if input_light is not none else (device_entities(device_id) | select('search', 'light.*ring_light_mode') | first) }}"
+  clock_light: "{{ input_light if input_light is not none else (device_entities(device_id) | select('search', 'light.*master_light_mode') | first) }}"
 
   input_std: !input manual_std_bright
   std_bright_ent: "{{ input_std if input_std is not none else (device_entities(device_id) | select('search', 'number.*standard_brightness_percentage') | first) }}"

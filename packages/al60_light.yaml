@@ -6,9 +6,9 @@ esphome:
     # Restore brightness and last used effect on boot
     - priority: 300
       then:
-        - script.execute: update_ring_light
+        - script.execute: update_master_light
         - lambda: |-
-            auto call = id(ring_light)->turn_on();
+            auto call = id(master_light)->turn_on();
             call.set_effect(id(last_clock_effect));
             call.perform();
     # Restore the last active sensor notification effect (if any)
@@ -100,7 +100,7 @@ ring_clock:
   # Core components
   id: RingClock
   time_id: sntp_time
-  light_id: ring_light
+  light_id: master_light
   # Display settings
   hour_sweep_switch: hour_sweep
   # Color pointers for customisation
@@ -132,9 +132,9 @@ ring_clock:
   # Event Handlers (Logic)
   on_ready:
     then:
-      - script.execute: update_ring_light
+      - script.execute: update_master_light
       - lambda: |-
-          auto call = id(ring_light)->turn_on();
+          auto call = id(master_light)->turn_on();
           call.set_effect(id(last_clock_effect));
           call.perform();
 
@@ -159,7 +159,7 @@ ring_clock:
       - rtttl.play: "timer_alert:d=16,o=6,b=120:c,e,g,c7,p,g,e,c,p,c,e,g,c7,p,g,e,c,p,8c7,p,8c7,p,8c7"
       - delay: 10s
       - lambda: |-
-          auto call = id(ring_light)->turn_on();
+          auto call = id(master_light)->turn_on();
           call.set_effect(id(last_clock_effect));
           call.perform();
   on_stopwatch_minute:
@@ -182,14 +182,14 @@ ring_clock:
       - rtttl.play: "sw_reset:d=16,o=6,b=120:c,d,e,f,g"
 
 script:
-  - id: update_ring_light
+  - id: update_master_light
     mode: restart # Restart if called again quickly
     then:
       - lambda: |-
           // Do not override the light state if it has been turned off.
           // This allows Home Assistant automations (e.g. night schedules) to
           // turn the light off and have it stay off until explicitly turned back on.
-          if (!id(ring_light)->remote_values.is_on()) return;
+          if (!id(master_light)->remote_values.is_on()) return;
 
           std::string mode = id(light_control_mode)->current_option();
 
@@ -220,7 +220,7 @@ script:
             target_pct = id(radar_occupancy)->state ? ambient_target : min_b;
           } else {
             // Manual mode: disengage component brightness management so the
-            // HA slider controls ring_light.brightness directly without interference.
+            // HA slider controls master_light.brightness directly without interference.
             if (!mode_changed) return;
             id(RingClock)->set_target_brightness(-1.0f);
             return;
@@ -228,14 +228,14 @@ script:
 
           // Hand brightness management over to the component, which steps
           // smoothly at BRIGHTNESS_SPEED (0.5 units/s) toward the new target.
-          // No ring_light.turn_on() here — the component calls it from loop()
+          // No master_light.turn_on() here — the component calls it from loop()
           // only when the value actually changes, bounded to BRIGHTNESS_STEP_MS.
           id(RingClock)->set_target_brightness(target_pct / 100.0f);
 
 light:
   # Main LED Rings Configuration (WS2812)
-  - id: ring_light
-    name: "Ring Light Mode"
+  - id: master_light
+    name: "Master Light"
     platform: esp32_rmt_led_strip
     max_refresh_rate: 25ms
     rgb_order: GRB
@@ -251,19 +251,25 @@ light:
       sorting_weight: 1
     on_state:
       - lambda: |-
-          if (id(ring_light)->remote_values.is_on()) {
-            std::string effect = id(ring_light)->get_effect_name();
+          static bool was_on = false;
+          bool is_on = id(master_light)->remote_values.is_on();
+
+          if (is_on) {
+            std::string effect = id(master_light)->get_effect_name();
 
             // When turned on with no active effect, restore the last clock effect.
             // This handles the case where the user toggles the light off then on
             // via the web UI or Home Assistant — ESPHome turns it on with "None"
-            // by default. The subsequent on_state call will have a real effect name.
-            if (effect == "None") {
-              auto call = id(ring_light)->turn_on();
+            // by default. If the user explicitly selects "None" while the light 
+            // is already on, we respect that to allow for a solid color mode.
+            if (effect == "None" && !was_on) {
+              auto call = id(master_light)->turn_on();
               call.set_effect(id(last_clock_effect));
               call.perform();
+              was_on = true;
               return;
             }
+            was_on = true;
 
             static std::string last_effect = "";
             bool effect_changed = (effect != last_effect);
@@ -318,6 +324,8 @@ light:
                 set_hand(id(marker_color), 255, 255, 255, 10/255.0f);
               }
             }
+          } else {
+            was_on = false;
           }
     effects:
       # Standard clock display updated every 200ms.

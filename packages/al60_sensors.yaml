@@ -91,7 +91,7 @@ sensor:
           send_every: 1
     on_value:
       then:
-        - script.execute: update_ring_light
+        - script.execute: update_master_light
 
 binary_sensor:
   # LD2410 GPIO Occupancy Input
@@ -110,9 +110,9 @@ binary_sensor:
     filters:
       - delayed_off: !lambda "return id(occupancy_cooloff).state * 1000;"
     on_press:
-      - script.execute: update_ring_light
+      - script.execute: update_master_light
     on_release:
-      - script.execute: update_ring_light
+      - script.execute: update_master_light
 
 # System Output Hardware
 output:
