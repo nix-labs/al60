@@ -390,7 +390,7 @@ light:
   - platform: rgb
     id: hour_hand_color
     name: "Hour Hand"
-    restore_mode: RESTORE_DEFAULT_ON
+    restore_mode: RESTORE_AND_ON
     default_transition_length: 0ms # Virtual light for color selection.
     red: output_hour_red
     green: output_hour_green
@@ -413,7 +413,7 @@ light:
   - platform: rgb
     id: minute_hand_color
     name: "Minute Hand"
-    restore_mode: RESTORE_DEFAULT_ON
+    restore_mode: RESTORE_AND_ON
     default_transition_length: 0ms # Virtual light for color selection.
     red: output_minute_red
     green: output_minute_green
@@ -436,7 +436,7 @@ light:
   - platform: rgb
     id: second_hand_color
     name: "Second Hand"
-    restore_mode: RESTORE_DEFAULT_ON
+    restore_mode: RESTORE_AND_ON
     default_transition_length: 0ms # Virtual light for color selection.
     red: output_second_red
     green: output_second_green
@@ -460,7 +460,7 @@ light:
   - platform: rgb
     id: marker_color
     name: "Markers"
-    restore_mode: RESTORE_DEFAULT_ON
+    restore_mode: RESTORE_AND_ON
     default_transition_length: 0ms # Virtual light for color selection.
     red: output_marker_red
     green: output_marker_green
