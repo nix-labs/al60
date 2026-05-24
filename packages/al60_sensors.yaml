@@ -7,7 +7,7 @@ substitutions:
   temp_offset_default: "-8"
   humidity_offset_default: "0.0"
   # Default radar cool-off period in seconds
-  occupancy_cooloff_default: "60"
+  occupancy_cooloff_default: "120"
 
 # I2C Bus Config (Used by RTC and Environmental Sensor)
 i2c:
@@ -39,21 +39,27 @@ sensor:
       accuracy_decimals: 0
       filters:
         - lambda: |-
-            // Get ambient (corrected) and raw (internal) temperature
-            float t_amb = id(temp_sensor)->state;
-            float t_raw = t_amb - id(temp_offset)->state;
+            // Pull the true raw values straight from the hardware component
+            float t_raw = id(aht_sensor)->temperature_sensor->get_raw_state();
+            float rh_raw = x;
 
-            if (std::isnan(t_amb) || std::isnan(x)) return std::max(0.0f, std::min(100.0f, x + id(humidity_offset)->state));
+            // Fetch our target ambient temperature (already offset-corrected)
+            float t_amb = id(temp_sensor)->state;
+
+            if (std::isnan(t_amb) || std::isnan(t_raw) || std::isnan(rh_raw)) {
+              return std::max(0.0f, std::min(100.0f, rh_raw + id(humidity_offset)->state));
+            }
 
             // Saturation Vapor Pressure formula (Magnus-Tetens)
             auto esat = [](float t) {
               return 6.112f * expf((17.67f * t) / (t + 243.5f));
             };
 
-            // Correct RH based on the ratio of saturation vapor pressures
-            float rh_corr = x * (esat(t_raw) / esat(t_amb));
+            // Correct RH: As air cools down to ambient room temp, RH goes UP.
+            // Ratio must be esat(t_raw) / esat(t_amb) where esat(t_raw) > esat(t_amb)
+            float rh_corr = rh_raw * (esat(t_raw) / esat(t_amb));
 
-            // Apply the manual trim offset on top of the physics-based correction
+            // Apply manual trim offset on top
             return std::max(0.0f, std::min(100.0f, rh_corr + id(humidity_offset)->state));
       web_server:
         sorting_group_id: sorting_sensors

@@ -535,7 +535,6 @@ number:
     unit_of_measurement: "°C"
     step: 0.1
     mode: box
-    icon: mdi:thermometer-lines
     initial_value: ${temp_offset_default}
     optimistic: true
     restore_value: true
