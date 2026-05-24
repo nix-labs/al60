@@ -39,8 +39,8 @@ sensor:
       accuracy_decimals: 0
       filters:
         - lambda: |-
-            // Pull the true raw values straight from the hardware component
-            float t_raw = id(aht_sensor)->temperature_sensor->get_raw_state();
+            // Pull the true raw, unfiltered temperature directly from the temp sensor object
+            float t_raw = id(temp_sensor)->raw_state;
             float rh_raw = x;
 
             // Fetch our target ambient temperature (already offset-corrected)
