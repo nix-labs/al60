@@ -40,7 +40,7 @@ sensor:
       filters:
         - lambda: |-
             // Pull the true raw, unfiltered temperature directly from the temp sensor object
-            float t_raw = id(temp_sensor)->raw_state;
+            float t_raw = id(temp_sensor)->get_raw_state();
             float rh_raw = x;
 
             // Fetch our target ambient temperature (already offset-corrected)
