@@ -11,6 +11,9 @@ substitutions:
 esphome:
   name: "${name}"
   friendly_name: "${friendly_name}"
+  project:
+    name: "NIXlabs.AL60"
+    version: "0"
 
 wifi:
   ssid: !secret wifi_ssid
@@ -22,7 +25,7 @@ packages:
   sensors: github://nix-labs/al60/packages/al60_sensors.yaml@main
   inputs: github://nix-labs/al60/packages/al60_inputs.yaml@main
   light: github://nix-labs/al60/packages/al60_light.yaml@main
-  # Optional: Enable full LD2410 UART radar integration (moving/still target sensors)
+  # Optional: Enable full LD2410 UART radar integration
   # radar: github://nix-labs/al60/packages/al60_radar.yaml@main
 
 external_components:

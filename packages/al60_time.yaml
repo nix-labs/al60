@@ -38,13 +38,12 @@ esphome:
                   level: WARN
                   format: "Boot: SNTP sync disabled (Manual Mode was active before reboot)."
 
-    # Priority 100: Network-dependent tasks (update check, auto-detect TZ, first SNTP sync)
+    # Priority 100: Network-dependent tasks (auto-detect TZ, first SNTP sync)
     - priority: 100
       then:
         - wait_until:
             condition:
               wifi.connected:
-        - update.check: firmware_update
         # Trigger an immediate SNTP sync on the first WiFi connection after boot.
         # (wifi on_connect handles subsequent connections.)
         - if:

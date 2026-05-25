@@ -91,23 +91,12 @@ api:
 
 # Over-The-Air Updates
 ota:
-  - platform: http_request # Allow pulling updates from the internet
   - platform: web_server # Allow uploading via web UI
   - platform: esphome # Allow updating via ESPHome dashboard
 
 # Required for http_request OTA platform and timezone discovery
 http_request:
 json:
-
-# Update Check for NIX labs compiled firmware
-update:
-  - platform: http_request
-    id: firmware_update
-    name: Firmware Update
-    source: https://assets.nixlabs.com.au/al60/firmware/manifest.json
-    web_server:
-      sorting_group_id: sorting_system
-      sorting_weight: 1
 
 wifi:
   # Disable WiFi power save to ensure the web interface remains highly responsive.

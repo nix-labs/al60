@@ -1,7 +1,6 @@
 # AL60 Radar Package
-#
 # Integrates the LD2410 mmWave radar sensor via UART.
-# Provides primary occupancy detection and advanced gate-level tuning.
+# Provides extra occupancy detection sensords and advanced gate-level tuning.
 
 uart:
   id: uart_bus
@@ -25,7 +24,7 @@ binary_sensor:
       web_server:
         sorting_group_id: sorting_sensors
         sorting_weight: 8
-        
+
     # Reports true for stationary targets (e.g., someone sleeping).
     has_still_target:
       id: radar_still
@@ -41,7 +40,7 @@ binary_sensor:
       web_server:
         sorting_group_id: sorting_sensors
         sorting_weight: 10
-        
+
     # Status of the physical OUT pin (requires Engineering Mode).
     out_pin_presence_status:
       id: radar_out_pin_status
@@ -144,14 +143,14 @@ number:
       web_server:
         sorting_group_id: sorting_sensors
         sorting_weight: 23
-        
+
     light_threshold:
       id: radar_light_threshold
       name: Radar Light Threshold
       web_server:
         sorting_group_id: sorting_sensors
         sorting_weight: 24
-        
+
     # Ignore movement beyond this gate.
     max_move_distance_gate:
       id: radar_max_move_distance_gate
@@ -159,7 +158,7 @@ number:
       web_server:
         sorting_group_id: sorting_sensors
         sorting_weight: 25
-        
+
     # Ignore still targets beyond this gate.
     max_still_distance_gate:
       id: radar_max_still_distance_gate
@@ -167,7 +166,7 @@ number:
       web_server:
         sorting_group_id: sorting_sensors
         sorting_weight: 26
-        
+
     # Gate Thresholds (0-100). Higher = less sensitive.
     g0:
       move_threshold:

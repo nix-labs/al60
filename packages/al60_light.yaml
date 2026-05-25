@@ -282,7 +282,7 @@ light:
               id(last_clock_effect) = effect;
             }
 
-            if (effect_changed) {
+            if (effect_changed && id(boot_complete)) {
               auto set_hand = [](light::LightState* ls, uint8_t r, uint8_t g, uint8_t b, float br = 1.0f) {
                 if (ls->get_effect_name().str() != "None") {
                   auto clear = ls->turn_on();

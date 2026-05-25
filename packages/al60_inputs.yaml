@@ -330,27 +330,6 @@ button:
       sorting_group_id: sorting_system
       sorting_weight: 3
 
-  # Consolidated Update Management
-  - platform: template
-    name: "Update Firmware"
-    id: update_firmware_button
-    web_server:
-      sorting_group_id: sorting_system
-      sorting_weight: 4
-    on_press:
-      then:
-        - logger.log: "Initiating firmware update process..."
-        - update.check: firmware_update
-        - delay: 3s # Allow time for manifest fetch and parsing
-        - if:
-            condition:
-              update.is_available: firmware_update
-            then:
-              - logger.log: "New version found! Starting Over-The-Air (OTA) update..."
-              - update.perform: firmware_update
-            else:
-              - logger.log: "No update available. Your clock is currently up to date."
-
   # Buzzer
   - platform: template
     name: Buzzer
