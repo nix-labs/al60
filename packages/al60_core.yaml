@@ -46,7 +46,6 @@ globals:
     initial_value: "0"
 
 esphome:
-  name_add_mac_suffix: false
   platformio_options:
     board_build.flash_mode: dio
 

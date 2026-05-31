@@ -4,7 +4,7 @@
 substitutions:
   # Default offsets to compensate for internal heat
   # These can be adjusted via the web UI or Home Assistant
-  temp_offset_default: "-8"
+  temp_offset_default: "0"
   humidity_offset_default: "0.0"
   # Default radar cool-off period in seconds
   occupancy_cooloff_default: "120"
