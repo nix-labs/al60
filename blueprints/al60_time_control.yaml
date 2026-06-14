@@ -65,6 +65,7 @@ variables:
 
   input_low: !input manual_low_bright
   low_bright_ent: "{{ input_low if input_low is not none else (device_entities(device_id) | select('search', 'number.*low_or_off_brightness_percentage') | first) }}"
+  night_action: !input night_action
 
 trigger:
   - platform: time
