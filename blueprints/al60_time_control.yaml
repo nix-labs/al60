@@ -31,8 +31,8 @@ blueprint:
               value: "dim"
     # OPTIONAL OVERRIDES
     manual_light:
-      name: (Optional) Override Light Entity
-      description: Select your ring light entity if your Clock Device was not entered above.
+      name: (Optional) Override Master Light Entity
+      description: Leave blank to use default master light entity from clock device
       default:
       selector:
         entity:
