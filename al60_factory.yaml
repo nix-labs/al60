@@ -1,7 +1,7 @@
 substitutions:
   name: "al60"
   friendly_name: "NIX labs AL60 Clock"
-  version: "0.9.3"
+  version: "0.1.0"
   time_zone: "AEST-10"
 
 esphome:
